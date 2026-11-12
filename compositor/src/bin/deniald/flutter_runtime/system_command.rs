@@ -833,12 +833,13 @@ fn application_command(
     application_environment.apply(&mut command, desktop_file_id, discovered_xmodifiers);
     // Internal tool metadata must never replace an application's restored mask.
     command.env_remove(denial_core::cpu_affinity::APPLICATION_CPUS_ENV);
-    // calloop's signalfd intentionally blocks the shutdown signals in every
-    // compositor thread. A fork inherits that mask, so undo it in the child
-    // between fork and exec; otherwise ordinary applications cannot receive
-    // SIGINT/SIGTERM from their own process manager. Also enforce ordinary
-    // CPU scheduling even if the compositor's kernel reset-on-fork guard or
-    // normal-scheduler fallback changes in the future.
+    // calloop's signalfd intentionally blocks signals in every compositor
+    // thread. A fork inherits that mask, so clear it in the child between fork
+    // and exec; otherwise ordinary applications cannot receive SIGINT/SIGTERM
+    // from their own process manager, and a launcher that waits for another
+    // blocked signal (xvfb-run waits for SIGUSR1) never runs its command.
+    // Also enforce ordinary CPU scheduling even if the compositor's kernel
+    // reset-on-fork guard or normal-scheduler fallback changes in the future.
     // SAFETY: the closure uses only libc signal-mask and scheduling syscalls
     // which are valid in the post-fork child, touches no shared Rust state,
     // and returns before exec on every error.
@@ -848,13 +849,8 @@ fn application_command(
             if libc::sigemptyset(signals.as_mut_ptr()) != 0 {
                 return Err(io::Error::last_os_error());
             }
-            let mut signals = signals.assume_init();
-            if libc::sigaddset(&mut signals, libc::SIGINT) != 0
-                || libc::sigaddset(&mut signals, libc::SIGTERM) != 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-            let result = libc::pthread_sigmask(libc::SIG_UNBLOCK, &signals, std::ptr::null_mut());
+            let signals = signals.assume_init();
+            let result = libc::pthread_sigmask(libc::SIG_SETMASK, &signals, std::ptr::null_mut());
             if result != 0 {
                 return Err(io::Error::from_raw_os_error(result));
             }
