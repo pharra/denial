@@ -1751,6 +1751,31 @@ fn queue_local_window_action(state: &mut RuntimeState, window_id: u64, action: W
 }
 
 #[cfg(feature = "flutter")]
+impl WaylandFrontend {
+    /// Sets stacking policy without granting focus or changing workspace ownership.
+    pub(super) fn set_window_pinned(&mut self, window_id: u64, pinned: bool) -> bool {
+        let window = self.window_for_id(window_id);
+        if let Some(managed) = window.as_ref().and_then(ManagedWindow::new) {
+            managed.prepare_always_on_top(pinned);
+        }
+        let record = self.window_registry.ensure(WindowId::new(window_id));
+        if record.pinned == pinned {
+            return false;
+        }
+        record.pinned = pinned;
+        if let Some(window) = window {
+            // Pinning leaves the managed layout; unpinning enrolls the current
+            // floating rectangle as its next restore geometry.
+            self.reconcile_window_layout(&window);
+            if pinned {
+                self.raise_window(&window, false);
+            }
+        }
+        true
+    }
+}
+
+#[cfg(feature = "flutter")]
 pub(super) fn toggle_always_on_top_focused_toplevel(state: &mut RuntimeState) -> bool {
     let local_window_id = focused_local_window(state);
     let client_window = local_window_id
@@ -1766,23 +1791,8 @@ pub(super) fn toggle_always_on_top_focused_toplevel(state: &mut RuntimeState) ->
         return false;
     };
 
-    let pinned = {
-        let frontend = state.frontend_mut();
-        let record = frontend.window_registry.ensure(WindowId::new(window_id));
-        record.pinned = !record.pinned;
-        record.pinned
-    };
-    if let Some(window) = client_window {
-        let frontend = state.frontend_mut();
-        // Pinned windows are floating overlays in every layout. Reconcile
-        // immediately so pinning collapses the vacated tile and restores the
-        // saved stacking rectangle, while unpinning enrolls the current
-        // floating rectangle as the next restore geometry.
-        frontend.reconcile_window_layout(&window);
-        if pinned {
-            frontend.raise_window(&window, true);
-        }
-    }
+    let pinned = !state.frontend().window_id_is_pinned(window_id);
+    state.frontend_mut().set_window_pinned(window_id, pinned);
     state.scene_sync.mark_dirty();
     true
 }

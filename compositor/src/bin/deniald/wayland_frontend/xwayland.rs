@@ -537,6 +537,26 @@ fn with_resource_dpi(resources: &str, dpi: u32) -> String {
 }
 
 impl super::WaylandFrontend {
+    /// Initial X11 state, including requests received before registration, lives
+    /// in Smithay's cache. Placement restore does not own pinning. Import it at
+    /// both map and association because either can precede the stable window ID.
+    #[cfg(feature = "flutter")]
+    fn import_x11_above(&mut self, window: &Window) -> bool {
+        let Some(surface) = window
+            .x11_surface()
+            .filter(|surface| !surface.is_override_redirect())
+        else {
+            return false;
+        };
+        let Some(window_id) = self
+            .window_root_surface(window)
+            .and_then(|root| self.surface_id(&root))
+        else {
+            return false;
+        };
+        self.set_window_pinned(window_id, surface.is_above())
+    }
+
     pub(super) fn set_xwayland_scale(
         &mut self,
         engine_scale_120: u32,
@@ -603,6 +623,25 @@ fn window_for_x11(state: &RuntimeState, surface: &X11Surface) -> Option<Window> 
 
 fn root_surface_for_x11(surface: &X11Surface) -> Option<WlSurface> {
     surface.wl_surface()
+}
+
+#[cfg(feature = "flutter")]
+fn apply_x11_above_request(state: &mut RuntimeState, surface: X11Surface, above: bool) {
+    if surface.is_override_redirect() {
+        return;
+    }
+    // A request can precede mapping or wl_surface association. Acknowledge it
+    // in the X11 cache now; the map/association path imports the desired state
+    // only once a native registry entry is available.
+    if let Err(error) = surface.set_above(above) {
+        warn!(%error, window = surface.window_id(), "could not acknowledge X11 always-on-top request");
+        return;
+    }
+    if let Some(window) = window_for_x11(state, &surface)
+        && state.frontend_mut().import_x11_above(&window)
+    {
+        state.scene_sync.mark_dirty();
+    }
 }
 
 fn initial_map_activates(override_redirect: bool) -> bool {
@@ -770,7 +809,13 @@ fn map_x11_window(state: &mut RuntimeState, surface: X11Surface, override_redire
         state
             .frontend_mut()
             .set_window_geometry_target(&window, configured);
-        state.frontend_mut().reconcile_window_layout(&window);
+        #[cfg(feature = "flutter")]
+        let pin_changed = state.frontend_mut().import_x11_above(&window);
+        #[cfg(not(feature = "flutter"))]
+        let pin_changed = false;
+        if !pin_changed {
+            state.frontend_mut().reconcile_window_layout(&window);
+        }
         #[cfg(feature = "flutter")]
         state.frontend_mut().configure_mobile_window(&window);
         #[cfg(feature = "flutter")]
@@ -917,7 +962,13 @@ impl XWaylandShellHandler for RuntimeState {
             if !surface.is_override_redirect() {
                 frontend.announce_foreign_toplevel(&window);
             }
-            frontend.reconcile_window_layout(&window);
+            #[cfg(feature = "flutter")]
+            let pin_changed = frontend.import_x11_above(&window);
+            #[cfg(not(feature = "flutter"))]
+            let pin_changed = false;
+            if !pin_changed {
+                frontend.reconcile_window_layout(&window);
+            }
             #[cfg(feature = "flutter")]
             frontend.configure_mobile_window(&window);
         }
@@ -1128,6 +1179,16 @@ impl XwmHandler for RuntimeState {
             self.frontend_mut().reconcile_window_layout(&element);
         }
         self.scene_sync.mark_dirty();
+    }
+
+    fn above_request(&mut self, _xwm: XwmId, _window: X11Surface) {
+        #[cfg(feature = "flutter")]
+        apply_x11_above_request(self, _window, true);
+    }
+
+    fn unabove_request(&mut self, _xwm: XwmId, _window: X11Surface) {
+        #[cfg(feature = "flutter")]
+        apply_x11_above_request(self, _window, false);
     }
 
     fn maximize_request(&mut self, _xwm: XwmId, window: X11Surface) {
@@ -1433,5 +1494,117 @@ mod tests {
     fn override_redirect_mapping_does_not_take_activation() {
         assert!(initial_map_activates(false));
         assert!(!initial_map_activates(true));
+    }
+
+    #[cfg(feature = "flutter")]
+    #[test]
+    #[ignore = "requires an X11 server; creates only unmapped windows"]
+    fn above_requests_before_registration_and_native_acknowledgement_preserve_x11_state()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use std::sync::{Arc, atomic::AtomicBool};
+
+        use smithay::desktop::Window;
+        use smithay::xwayland::{X11Surface, xwm::Atoms};
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::{
+            AtomEnum, ConnectionExt, CreateWindowAux, MapState, WindowClass,
+        };
+
+        use super::{RuntimeState, apply_x11_above_request};
+        use crate::wayland_frontend::managed_window::ManagedWindow;
+
+        let (connection, screen) = x11rb::connect(None)?;
+        let root = connection.setup().roots[screen].root;
+        let connection = Arc::new(connection);
+        let atoms = Atoms::new(&*connection)?.reply()?;
+        let initial_focus = connection.get_input_focus()?.reply()?.focus;
+        let create_surface = |override_redirect| -> Result<X11Surface, Box<dyn std::error::Error>> {
+            let id = connection.generate_id()?;
+            connection
+                .create_window(
+                    0,
+                    id,
+                    root,
+                    0,
+                    0,
+                    32,
+                    32,
+                    0,
+                    WindowClass::INPUT_OUTPUT,
+                    0,
+                    &CreateWindowAux::new().override_redirect(u32::from(override_redirect)),
+                )?
+                .check()?;
+            Ok(X11Surface::new(
+                None,
+                id,
+                override_redirect,
+                Arc::downgrade(&connection),
+                atoms.clone(),
+                None,
+                smithay::utils::Rectangle::from_size((32, 32).into()),
+                Arc::new(AtomicBool::new(false)),
+            ))
+        };
+        let surface = create_surface(false)?;
+        let window = Window::new_x11_window(surface.clone());
+        let managed = ManagedWindow::new(&window).unwrap();
+        let assert_states = |expected: &[u32]| -> Result<(), Box<dyn std::error::Error>> {
+            let reply = connection
+                .get_property(
+                    false,
+                    surface.window_id(),
+                    atoms._NET_WM_STATE,
+                    AtomEnum::ATOM,
+                    0,
+                    16,
+                )?
+                .reply()?;
+            let mut actual = reply.value32().expect("ATOM property").collect::<Vec<_>>();
+            let mut expected = expected.to_vec();
+            actual.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(actual, expected);
+            Ok(())
+        };
+
+        // No native registration exists yet. The accepted desired state must
+        // survive here for the later map/association import, with other state
+        // preserved in the actual server property as well as Smithay's cache.
+        let mut state = RuntimeState::default();
+        assert!(surface.wl_surface().is_none());
+        surface.set_fullscreen(true)?;
+        apply_x11_above_request(&mut state, surface.clone(), true);
+        apply_x11_above_request(&mut state, surface.clone(), true);
+        assert!(surface.is_above());
+        assert_states(&[atoms._NET_WM_STATE_ABOVE, atoms._NET_WM_STATE_FULLSCREEN])?;
+
+        // A native unpin must publish back to X11, otherwise the next client
+        // TOGGLE is interpreted against stale cached ABOVE state by the XWM.
+        managed.prepare_always_on_top(false);
+        managed.prepare_always_on_top(false);
+        assert!(!surface.is_above());
+        assert_states(&[atoms._NET_WM_STATE_FULLSCREEN])?;
+        managed.prepare_always_on_top(true);
+        assert!(surface.is_above());
+        assert_states(&[atoms._NET_WM_STATE_ABOVE, atoms._NET_WM_STATE_FULLSCREEN])?;
+        apply_x11_above_request(&mut state, surface.clone(), false);
+        apply_x11_above_request(&mut state, surface.clone(), false);
+        assert!(!surface.is_above());
+        assert_states(&[atoms._NET_WM_STATE_FULLSCREEN])?;
+
+        let popup = create_surface(true)?;
+        apply_x11_above_request(&mut state, popup.clone(), true);
+        assert!(!popup.is_above());
+        assert_eq!(connection.get_input_focus()?.reply()?.focus, initial_focus);
+        assert_eq!(
+            connection
+                .get_window_attributes(surface.window_id())?
+                .reply()?
+                .map_state,
+            MapState::UNMAPPED
+        );
+        assert!(!surface.is_activated());
+        Ok(())
     }
 }

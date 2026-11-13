@@ -456,6 +456,18 @@ impl<'a> ManagedWindow<'a> {
         }
     }
 
+    /// Acknowledges native stacking policy to clients that expose an ABOVE state.
+    pub(super) fn prepare_always_on_top(&self, pinned: bool) {
+        #[cfg(feature = "xwayland")]
+        if let ManagedWindowProtocol::X11(surface) = self.protocol
+            && let Err(error) = surface.set_above(pinned)
+        {
+            warn!(%error, window = surface.window_id(), "could not publish X11 always-on-top state");
+        }
+        #[cfg(not(feature = "xwayland"))]
+        let _ = pinned;
+    }
+
     /// Clears client-owned fullscreen/maximize constraints before a shell
     /// operation takes geometry ownership.
     pub(super) fn clear_geometry_constraints(&self) -> bool {

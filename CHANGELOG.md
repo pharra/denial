@@ -160,6 +160,9 @@ boundaries may change before 1.0.
   block clicks and focus on windows behind their input holes. Reparenting
   frames follow client input and bounding shapes as they change, resize, or
   map again.
+- Xwayland clients' always-on-top requests now use Denial's pin state, including
+  requests made before mapping. Requests from the client and Denial's pin
+  controls keep the X11 state synchronized.
 - Qt and other Xlib apps under Xwayland are scaled: Denial also sets
   `Xft.dpi` in the X resources, which they read instead of XSETTINGS.
 - A quick flick in mobile recents reaches the next card however short it

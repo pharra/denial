@@ -31,3 +31,18 @@ cargo test --locked --manifest-path compositor/Cargo.toml --features flutter \
   --bin deniald frame_preserves_client_input_holes_across_shape_and_lifecycle_changes \
   -- --ignored
 ```
+
+## Xwayland always-on-top requests
+
+The opt-in regression uses private, never-mapped X11 windows. It covers early
+ADD/REMOVE requests, idempotency, native `ManagedWindow` acknowledgement,
+retaining fullscreen, and ignoring override-redirect windows. It also checks
+that focus and mapping state are unchanged. It does not cover the full runtime
+map/association lifecycle or real `ClientMessage` dispatch. From the
+repository root, run:
+
+```sh
+cargo test --locked --manifest-path compositor/Cargo.toml --features flutter \
+  --bin deniald above_requests_before_registration_and_native_acknowledgement_preserve_x11_state \
+  -- --ignored
+```
