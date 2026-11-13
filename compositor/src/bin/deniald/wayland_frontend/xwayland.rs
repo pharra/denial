@@ -6,6 +6,7 @@ use denial_core::topology::SCALE_BASE;
 use smithay::desktop::Window;
 use smithay::input::pointer::Focus;
 use smithay::reexports::calloop::EventLoop;
+use smithay::reexports::calloop::channel::Event as ChannelEvent;
 use smithay::reexports::wayland_server::Resource;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, DisplayHandle};
@@ -48,6 +49,9 @@ use super::{
 #[cfg(feature = "flutter")]
 use super::{WindowPlacementChange, WindowPlacementPhase};
 
+#[path = "xwayland/input_shape.rs"]
+mod input_shape;
+
 const XWAYLAND_BASE_DPI: u32 = 96;
 const XWAYLAND_SCALE_MODE_ENV: &str = "DENIAL_XWAYLAND_SCALE_MODE";
 
@@ -63,6 +67,7 @@ struct ActiveXWayland {
     shell_state: XWaylandShellState,
     _keyboard_grab_state: XWaylandKeyboardGrabState,
     xwm: Option<X11Wm>,
+    input_shapes: Option<input_shape::InputShapes>,
     #[cfg(feature = "flutter")]
     xembed_tray: Option<super::super::xembed_tray::XEmbedTray>,
     client: Client,
@@ -176,6 +181,26 @@ impl XWaylandState {
                         }
                         publish_resource_dpi(active.display, dpi(active.app_scale_120()));
                         active.xwm = Some(xwm);
+                        match input_shape::InputShapes::start(active.display) {
+                            Ok((shapes, source)) => {
+                                match xwm_loop_handle.insert_source(source, |event, _, state| {
+                                    let ChannelEvent::Msg(event) = event else {
+                                        error!("Xwayland input shape connection closed");
+                                        return;
+                                    };
+                                    if let Some(shapes) = state.frontend_mut().xwayland.active
+                                        .as_mut().and_then(|active| active.input_shapes.as_mut())
+                                        && let Err(error) = shapes.handle_event(event)
+                                    {
+                                        warn!(%error, "could not synchronize Xwayland input shape");
+                                    }
+                                }) {
+                                    Ok(_) => active.input_shapes = Some(shapes),
+                                    Err(error) => error!(%error, "could not register Xwayland input shape source"),
+                                }
+                            }
+                            Err(error) => error!(%error, "could not start Xwayland input shape synchronization"),
+                        }
                         #[cfg(feature = "flutter")]
                         match super::super::xembed_tray::XEmbedTray::start(OsString::from(format!(
                             ":{}",
@@ -217,6 +242,7 @@ impl XWaylandState {
                 shell_state,
                 _keyboard_grab_state: keyboard_grab_state,
                 xwm: None,
+                input_shapes: None,
                 #[cfg(feature = "flutter")]
                 xembed_tray: None,
                 client,
@@ -949,6 +975,17 @@ impl XwmHandler for RuntimeState {
             warn!(%error, window = window.window_id(), "could not grant X11 map request");
             return;
         }
+        if let Some(shapes) = self
+            .frontend_mut()
+            .xwayland
+            .active
+            .as_mut()
+            .and_then(|active| active.input_shapes.as_mut())
+            && let Some(frame) = window.mapped_window_id()
+            && let Err(error) = shapes.track(window.window_id(), frame)
+        {
+            warn!(%error, window = window.window_id(), "could not track X11 input shape");
+        }
         map_x11_window(self, window, false);
     }
 
@@ -957,10 +994,28 @@ impl XwmHandler for RuntimeState {
     }
 
     fn unmapped_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(shapes) = self
+            .frontend_mut()
+            .xwayland
+            .active
+            .as_mut()
+            .and_then(|active| active.input_shapes.as_mut())
+        {
+            shapes.forget(window.window_id());
+        }
         unmap_x11_window(self, &window);
     }
 
     fn destroyed_window(&mut self, _xwm: XwmId, window: X11Surface) {
+        if let Some(shapes) = self
+            .frontend_mut()
+            .xwayland
+            .active
+            .as_mut()
+            .and_then(|active| active.input_shapes.as_mut())
+        {
+            shapes.forget(window.window_id());
+        }
         unmap_x11_window(self, &window);
         if let Some(root) = root_surface_for_x11(&window) {
             self.frontend_mut().remove_surface_state(&root, false);

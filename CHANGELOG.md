@@ -156,6 +156,10 @@ boundaries may change before 1.0.
 
 ### Fixed
 
+- Transparent Xwayland overlays, including Coopanion desktop pets, no longer
+  block clicks and focus on windows behind their input holes. Reparenting
+  frames follow client input and bounding shapes as they change, resize, or
+  map again.
 - Qt and other Xlib apps under Xwayland are scaled: Denial also sets
   `Xft.dpi` in the X resources, which they read instead of XSETTINGS.
 - A quick flick in mobile recents reaches the next card however short it

@@ -18,3 +18,16 @@ Do not add exhaustive value permutations, option-parser examples, cache or
 allocation trivia, duplicated round trips, synthetic integer-limit scenarios,
 or tests for states that production validation makes unreachable. Prefer one
 strong invariant test over many examples of the same branch.
+
+## Xwayland input regions
+
+The input-shape regression uses an X11 server named by `DISPLAY`. It creates
+only unmapped windows and checks the frame's actual server-side input region
+after shape changes, resizing, and reparenting. It is ignored by default so
+headless test runs do not need an X server. From the repository root, run:
+
+```sh
+cargo test --locked --manifest-path compositor/Cargo.toml --features flutter \
+  --bin deniald frame_preserves_client_input_holes_across_shape_and_lifecycle_changes \
+  -- --ignored
+```
