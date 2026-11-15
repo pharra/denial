@@ -915,6 +915,23 @@ class _DesktopWindowContent extends ConsumerWidget {
 
   Widget _buildSurface(BuildContext context, WidgetRef ref) {
     final theme = ShellTheme.of(context);
+    // A client-positioned overlay draws itself over the window it annotates:
+    // no Denial material, frame, rounded corners or glass behind it, so the
+    // client's own alpha is what the user sees.
+    if (window.isClientOverlay) {
+      return _DesktopSurfaceTexture(
+        window: window,
+        allowDirectLayers: allowDirectLayers,
+        smooth: smooth,
+        presentationScale:
+            presentationScale ?? MediaQuery.devicePixelRatioOf(context),
+        pixelGridOrigin: pixelGridOrigin,
+        radius: 0,
+        frameWidth: 0,
+        frameColor: const Color(0x00000000),
+        backdrop: null,
+      );
+    }
     final windowOpacity = active
         ? theme.focusedWindowOpacity
         : theme.unfocusedWindowOpacity;

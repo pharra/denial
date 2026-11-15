@@ -628,6 +628,16 @@ fn initial_map_activates(override_redirect: bool) -> bool {
     !override_redirect
 }
 
+/// X11 windows that place themselves. Denial must grant their ConfigureRequests
+/// instead of imposing a saved placement, or an overlay lands somewhere else.
+fn x11_client_positioned(surface: &X11Surface) -> bool {
+    super::managed_window::x11_client_positioned(
+        surface.is_override_redirect(),
+        surface.is_above(),
+        surface.is_skip_taskbar(),
+    )
+}
+
 fn constrain_x11_size_to_output(
     mut geometry: Rectangle<i32, Logical>,
     output: Rectangle<i32, Logical>,
@@ -681,6 +691,17 @@ fn map_x11_window(state: &mut RuntimeState, surface: X11Surface, override_redire
         let frontend = state.frontend_mut();
         let (configured, restored_record) = if override_redirect {
             (geometry, None)
+        } else if x11_client_positioned(&surface) {
+            // Keep the origin the client asked for. Centering it or replaying a
+            // saved placement would move an overlay off the window it tracks.
+            let output = frontend
+                .outputs
+                .iter()
+                .find(|entry| entry.logical_geometry.contains(geometry.loc))
+                .or_else(|| frontend.outputs.first())
+                .map(|entry| entry.logical_geometry)
+                .unwrap_or(frontend.desktop_bounds);
+            (constrain_x11_size_to_output(geometry, output), None)
         } else {
             let transient_parent = surface.is_transient_for().and_then(|parent_id| {
                 frontend.space.elements().find_map(|candidate| {
@@ -1085,8 +1106,8 @@ impl XwmHandler for RuntimeState {
         &mut self,
         _xwm: XwmId,
         window: X11Surface,
-        _x: Option<i32>,
-        _y: Option<i32>,
+        x: Option<i32>,
+        y: Option<i32>,
         width: Option<u32>,
         height: Option<u32>,
         _reorder: Option<Reorder>,
@@ -1118,6 +1139,16 @@ impl XwmHandler for RuntimeState {
         }
         if let Some(height) = height {
             geometry.size.h = i32::try_from(height).unwrap_or(i32::MAX).clamp(1, 16_384);
+        }
+        if x11_client_positioned(&window) {
+            // A HUD aligns itself to the window it annotates, so its move
+            // requests are part of its contract, not compositor-owned drift.
+            if let Some(x) = x {
+                geometry.loc.x = x;
+            }
+            if let Some(y) = y {
+                geometry.loc.y = y;
+            }
         }
         if let Some(element) = element {
             let output_geometry = {
@@ -1159,6 +1190,11 @@ impl XwmHandler for RuntimeState {
             frontend
                 .space
                 .map_element(element.clone(), geometry.loc, false);
+        } else if x11_client_positioned(&window) {
+            // The client owns an overlay's origin: it moves itself onto the
+            // window it annotates, so follow the notification instead of
+            // snapping back to a compositor-chosen target.
+            frontend.set_window_geometry_target(&element, geometry);
         } else {
             // ConfigureNotify also follows compositor-issued X11 configures.
             // Feeding that notification back into Space gives the client a
@@ -1502,5 +1538,19 @@ mod tests {
     fn override_redirect_mapping_does_not_take_activation() {
         assert!(initial_map_activates(false));
         assert!(!initial_map_activates(true));
+    }
+
+    #[cfg(feature = "xwayland")]
+    #[test]
+    fn overlays_that_ask_to_float_keep_their_own_placement() {
+        use crate::wayland_frontend::managed_window::x11_client_positioned as positioned;
+        // Plain managed windows keep the compositor's placement policy.
+        assert!(!positioned(false, false, false));
+        // Always-on-top or skip-taskbar windows are overlays, not documents.
+        assert!(positioned(false, true, false));
+        assert!(positioned(false, false, true));
+        assert!(positioned(false, true, true));
+        // Override-redirect windows already place themselves elsewhere.
+        assert!(!positioned(true, true, true));
     }
 }
