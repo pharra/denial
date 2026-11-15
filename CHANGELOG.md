@@ -65,6 +65,8 @@ boundaries may change before 1.0.
   libinput's flat pointer profile.
 - `zwp_input_timestamps_v1`: clients get libinput's microsecond time for each
   key, pointer and touch event.
+- `wp_single_pixel_buffer_manager_v1`: clients create one-pixel solid-color
+  buffers without shared memory, usually scaled with `wp_viewport`.
 - `denial_keyboard_inset_v1` lets an app follow the on-screen keyboard's
   height as it opens, closes and is dragged, and lay itself out around the
   keys instead of being moved above them.

@@ -48,6 +48,8 @@ impl WaylandFrontend {
         let pointer_constraints_state =
             PointerConstraintsState::new::<RuntimeState>(&display_handle);
         let viewporter_state = ViewporterState::new::<RuntimeState>(&display_handle);
+        let single_pixel_buffer_state =
+            SinglePixelBufferState::new::<RuntimeState>(&display_handle);
         let alpha_modifier_state = AlphaModifierState::new::<RuntimeState>(&display_handle);
         let fractional_scale_manager_state =
             FractionalScaleManagerState::new::<RuntimeState>(&display_handle);
@@ -323,6 +325,7 @@ impl WaylandFrontend {
             _relative_pointer_manager_state: relative_pointer_manager_state,
             _pointer_constraints_state: pointer_constraints_state,
             _viewporter_state: viewporter_state,
+            _single_pixel_buffer_state: single_pixel_buffer_state,
             _alpha_modifier_state: alpha_modifier_state,
             _fractional_scale_manager_state: fractional_scale_manager_state,
             _xdg_decoration_state: xdg_decoration_state,

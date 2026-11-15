@@ -105,6 +105,7 @@ use smithay::wayland::shell::wlr_layer::{
     WlrLayerShellHandler, WlrLayerShellState,
 };
 use smithay::wayland::shm::{ShmHandler, ShmState};
+use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
 use smithay::wayland::socket::ListeningSocketSource;
 use smithay::input::tablet::TabletSeatHandler;
 use smithay::wayland::tablet_manager::TabletManagerState;
@@ -450,6 +451,7 @@ pub(super) struct WaylandFrontend {
     pub _relative_pointer_manager_state: RelativePointerManagerState,
     pub _pointer_constraints_state: PointerConstraintsState,
     _viewporter_state: ViewporterState,
+    _single_pixel_buffer_state: SinglePixelBufferState,
     _alpha_modifier_state: AlphaModifierState,
     _fractional_scale_manager_state: FractionalScaleManagerState,
     _xdg_decoration_state: XdgDecorationState,
