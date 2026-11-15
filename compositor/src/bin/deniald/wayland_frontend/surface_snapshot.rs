@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use smithay::reexports::wayland_server::protocol::{wl_buffer, wl_shm};
 use smithay::wayland::shm::{BufferAccessError, BufferData, with_buffer_contents};
+use smithay::wayland::single_pixel_buffer::{SinglePixelBufferUserData, get_single_pixel_buffer};
 
 use super::super::flutter_runtime::{ShmSnapshotPool, ShmTextureFrame};
 
@@ -94,12 +95,27 @@ fn validate_shm_layout(
     })
 }
 
+/// Converts a `wp_single_pixel_buffer_manager_v1` buffer into the same RGBA
+/// snapshot Flutter composes for SHM clients. The protocol fixes the buffer at
+/// 1×1 with premultiplied channels; clients scale it with `wp_viewport`.
+fn single_pixel_frame(
+    pixel: &SinglePixelBufferUserData,
+    revision: u64,
+) -> Result<ShmTextureFrame, &'static str> {
+    ShmTextureFrame::new_owned(1, 1, revision, pixel.rgba8888().to_vec())
+}
+
 pub(super) fn snapshot_shm_buffer(
     buffer: &wl_buffer::WlBuffer,
     revision: u64,
     available_cache_bytes: usize,
     snapshot_pool: &Arc<ShmSnapshotPool>,
 ) -> Result<Option<ShmTextureFrame>, Box<dyn Error>> {
+    if let Ok(pixel) = get_single_pixel_buffer(buffer) {
+        return single_pixel_frame(pixel, revision)
+            .map(Some)
+            .map_err(Into::into);
+    }
     let snapshot = with_buffer_contents(
         buffer,
         |source, pool_len, data: BufferData| -> Result<ShmTextureFrame, Box<dyn Error>> {
@@ -190,5 +206,26 @@ pub(super) fn snapshot_shm_buffer(
         Ok(snapshot) => snapshot.map(Some),
         Err(BufferAccessError::NotManaged) => Ok(None),
         Err(error) => Err(error.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn single_pixel_frame_keeps_premultiplied_rgba_channels() {
+        let frame = single_pixel_frame(
+            &SinglePixelBufferUserData {
+                r: u32::MAX,
+                g: u32::MAX / 2,
+                b: 0,
+                a: u32::MAX / 2,
+            },
+            7,
+        )
+        .unwrap();
+        assert_eq!((frame.width(), frame.height()), (1, 1));
+        assert_eq!(frame.pixels_if_single(), Some([255, 127, 0, 127]));
     }
 }
