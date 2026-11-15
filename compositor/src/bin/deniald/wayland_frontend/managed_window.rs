@@ -220,7 +220,17 @@ impl<'a> ManagedWindow<'a> {
             }
             #[cfg(feature = "xwayland")]
             ManagedWindowProtocol::X11(surface) => {
-                let auxiliary = !matches!(surface.window_type(), None | Some(WmWindowType::Normal));
+                let override_redirect = surface.is_override_redirect();
+                let skip_taskbar = surface.is_skip_taskbar();
+                // A window that floats over another one owns its rectangle and
+                // asked for no frame, so Denial neither places nor decorates
+                // it. Only its content is drawn, with the client's own alpha.
+                let client_positioned =
+                    x11_client_positioned(override_redirect, surface.is_above(), skip_taskbar);
+                // Windows that opt out of taskbars are panels and overlays, not
+                // document windows: keep them out of tiling layouts the same
+                // way a non-Normal window type already is.
+                let auxiliary = x11_auxiliary(surface.window_type(), skip_taskbar);
                 let protocol_popup = matches!(
                     surface.window_type(),
                     Some(
@@ -240,11 +250,13 @@ impl<'a> ManagedWindow<'a> {
                         resizing: false,
                     },
                     // Client motif hints do not choose Denial's frame policy.
-                    // Only protocol-level popups and override-redirect surfaces
-                    // are excluded from the managed toplevel frame.
-                    server_side_decorated: !surface.is_override_redirect() && !protocol_popup,
+                    // Popups, override-redirect surfaces and client-positioned
+                    // overlays are excluded from the managed toplevel frame.
+                    server_side_decorated: !override_redirect
+                        && !protocol_popup
+                        && !client_positioned,
                     auxiliary,
-                    override_redirect: surface.is_override_redirect(),
+                    override_redirect,
                     minimum_size: surface.min_size().unwrap_or_else(|| Size::from((0, 0))),
                     maximum_size: surface.max_size().unwrap_or_else(|| Size::from((0, 0))),
                     x11: true,
@@ -779,6 +791,27 @@ pub(super) fn toplevel_has_state(
     })
 }
 
+/// X11 windows that place themselves: HUDs, deck trackers, launchers and other
+/// always-on-top overlays ask to float and to stay out of taskbars, then move
+/// themselves onto the window they annotate. They own their origin, and they
+/// asked for no frame, so Denial neither places nor decorates them.
+#[cfg(feature = "xwayland")]
+pub(super) fn x11_client_positioned(
+    override_redirect: bool,
+    above: bool,
+    skip_taskbar: bool,
+) -> bool {
+    !override_redirect && (above || skip_taskbar)
+}
+
+/// X11 auxiliary surfaces stay out of managed layouts. A window type other than
+/// Normal already means "not a document"; so does an explicit skip-taskbar
+/// request, which is how HUDs, panels and overlays identify themselves.
+#[cfg(feature = "xwayland")]
+fn x11_auxiliary(window_type: Option<WmWindowType>, skip_taskbar: bool) -> bool {
+    skip_taskbar || !matches!(window_type, None | Some(WmWindowType::Normal))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -788,6 +821,18 @@ mod tests {
             size: Some(Size::from((width, 600))),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn skip_taskbar_windows_are_auxiliary() {
+        use smithay::xwayland::xwm::WmWindowType;
+        assert!(!x11_auxiliary(None, false));
+        assert!(!x11_auxiliary(Some(WmWindowType::Normal), false));
+        // A HUD that only marks itself as a taskbar-less overlay still never
+        // joins a managed layout.
+        assert!(x11_auxiliary(Some(WmWindowType::Normal), true));
+        assert!(x11_auxiliary(None, true));
+        assert!(x11_auxiliary(Some(WmWindowType::Dialog), false));
     }
 
     #[test]

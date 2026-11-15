@@ -330,6 +330,17 @@ class DenialWindow {
   bool get isUserApp =>
       !isLayerShell && !isPopupSurface && !isHome && !isSystemUi;
 
+  /// An undecorated X11 surface the client positions itself: a game HUD, a deck
+  /// tracker, an input overlay. It belongs to the window it annotates rather
+  /// than to a task of its own, so the shell draws it but never offers it as an
+  /// application to switch to.
+  bool get isClientOverlay =>
+      suppressAnimations && !isLayerShell && !isPopupSurface;
+
+  /// Whether this window is an entry in the application lists: the switcher,
+  /// recents, the taskbar and the launcher.
+  bool get isAppEntry => isUserApp && !isClientOverlay;
+
   /// Whether this scene entry should play Denial's one-time window entrance.
   ///
   /// A replacement Flutter engine reconstructs windows which were already

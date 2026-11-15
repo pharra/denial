@@ -163,6 +163,13 @@ boundaries may change before 1.0.
 - Xwayland clients' always-on-top requests now use Denial's pin state, including
   requests made before mapping. Requests from the client and Denial's pin
   controls keep the X11 state synchronized.
+- Xwayland overlays that ask to float, such as game HUDs and deck trackers, now
+  keep the position and size they request instead of a saved or centered
+  placement, and they stay out of managed layouts. A tracker can therefore sit
+  on the game window it annotates. Denial draws such an overlay as the client
+  draws it: no frame, rounded corners, shadow or glass behind it, so its
+  transparent regions stay transparent, and it is not offered as a window of
+  its own in the switcher or recents.
 - Qt and other Xlib apps under Xwayland are scaled: Denial also sets
   `Xft.dpi` in the X resources, which they read instead of XSETTINGS.
 - A quick flick in mobile recents reaches the next card however short it

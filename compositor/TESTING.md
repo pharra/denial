@@ -46,3 +46,22 @@ cargo test --locked --manifest-path compositor/Cargo.toml --features flutter \
   --bin deniald above_requests_before_registration_and_native_acknowledgement_preserve_x11_state \
   -- --ignored
 ```
+
+## Xwayland overlay placement policy
+
+`overlays_that_ask_to_float_keep_their_own_placement` and
+`skip_taskbar_windows_are_auxiliary` are plain unit tests: they cover the
+predicate that decides whether an X11 window owns its placement and whether it
+stays out of managed layouts. They need no X server and run with the normal
+suite:
+
+```sh
+cargo test --locked --manifest-path compositor/Cargo.toml --features flutter \
+  --bin deniald -- overlay skip_taskbar
+```
+
+The overlay policy itself is covered by two Rust unit tests:
+`overlays_that_ask_to_float_keep_their_own_placement` (client-owned origin) and
+`skip_taskbar_windows_are_auxiliary` (layout exclusion). The shell side reads
+the resulting `server_side_decorated` and `suppress_animations` flags, which
+make an overlay draw with its own alpha and stay out of the switcher.

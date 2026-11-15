@@ -298,10 +298,14 @@ class ReferenceShellState {
     final open = openAppWindowsByObjectId;
     bool rides(DenialWindow window) =>
         open.containsKey(window.transientParentObjectId);
-    if (!openAppWindows.any(rides)) return openAppWindows;
+    // A client-positioned overlay is part of the app it annotates, never a
+    // card of its own.
+    bool card(DenialWindow window) =>
+        !window.isClientOverlay && !rides(window);
+    if (openAppWindows.every(card)) return openAppWindows;
     return [
       for (final window in openAppWindows)
-        if (!rides(window)) window,
+        if (card(window)) window,
     ];
   }
 

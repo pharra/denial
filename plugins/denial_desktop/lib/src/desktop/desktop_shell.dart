@@ -214,7 +214,10 @@ class _DesktopShellState extends ConsumerState<DesktopShell> {
     final shell = ref.read(referenceShellProvider);
     final workspace = ref.read(desktopWorkspaceProvider);
     final windowsById = <int, DenialWindow>{
-      for (final window in shell.desk.openAppWindows) window.objectId: window,
+      // A client-positioned overlay belongs to the window it annotates, so it
+      // is never a switch target of its own.
+      for (final window in shell.desk.openAppWindows)
+        if (!window.isClientOverlay) window.objectId: window,
     };
     final controller = ref.read(desktopWindowSwitcherProvider.notifier);
     final previous = ref.read(desktopWindowSwitcherProvider);
