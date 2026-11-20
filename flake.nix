@@ -11,9 +11,10 @@
     ];
   };
 
+  # The one Nixpkgs every output derives from. A consumer that wants another
+  # selects it by making this input follow theirs; nothing else pins a second
+  # package set.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-  # Validation host only; it must never replace the engine producer's pin.
-  inputs.nixpkgsUnstable.url = "github:NixOS/nixpkgs/nixos-unstable";
   inputs.denialPlugins = {
     url = "github:denialwm/denial-plugins/4b7adf998852b09b9a91c1cfab48be58debf2e80";
     flake = false;
@@ -33,7 +34,6 @@
     {
       self,
       nixpkgs,
-      nixpkgsUnstable,
       denialPlugins,
       denialApps,
       gpuiTouch,
@@ -68,12 +68,6 @@
           inherit system;
           overlays = [ localOverlay ];
         };
-      mkUnstablePkgs =
-        system:
-        import nixpkgsUnstable {
-          inherit system;
-          overlays = [ localOverlay ];
-        };
     in
     {
       # Native dependencies come from the consumer's package set. Only the
@@ -84,7 +78,6 @@
         system:
         let
           pkgs = mkPkgs system;
-          unstablePkgs = mkUnstablePkgs system;
           flutterMaintenanceSources = pkgs.callPackage ./nix/flutter-engine.nix {
             maintenanceOnly = true;
             flutterNixpkgs = nixpkgs;
@@ -93,7 +86,6 @@
         {
           default = pkgs.denial;
           denial = pkgs.denial;
-          denial-unstable = unstablePkgs.denial;
           denial-plugin-manager = pkgs.denialPluginManager;
           denial-cachix-cli = pkgs.cachix;
           denial-nix-maintenance-tools = pkgs.buildEnv {
@@ -118,7 +110,6 @@
         system:
         let
           pkgs = mkPkgs system;
-          unstablePkgs = mkUnstablePkgs system;
         in
         {
           inherit (pkgs.denial.tests) path-contract;
@@ -133,25 +124,8 @@
             module = self.nixosModules.denial;
             nixosSystem = nixpkgs.lib.nixosSystem;
           };
-          module-unstable = import ./nix/tests/module.nix {
-            pkgs = mkUnstablePkgs system;
-            module = self.nixosModules.denial;
-            nixosSystem = nixpkgsUnstable.lib.nixosSystem;
-          };
           engine-manifest = pkgs.callPackage ./nix/tests/engine-manifest.nix { };
           engine-cache = pkgs.callPackage ./nix/tests/engine-cache.nix {
-            expectedRawEngine = pkgs.denialFlutter.pinnedRawEngine;
-            newerDriver =
-              if
-                (nixpkgs.lib.versionOlder (nixpkgs.lib.versions.majorMinor pkgs.stdenv.cc.libc.version) (
-                  nixpkgs.lib.versions.majorMinor unstablePkgs.stdenv.cc.libc.version
-                ))
-              then
-                "${unstablePkgs.mesa}/lib/libgallium-${unstablePkgs.mesa.version}.so"
-              else
-                null;
-          };
-          engine-cache-unstable = unstablePkgs.callPackage ./nix/tests/engine-cache.nix {
             expectedRawEngine = pkgs.denialFlutter.pinnedRawEngine;
           };
         }

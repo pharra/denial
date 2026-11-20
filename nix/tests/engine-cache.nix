@@ -6,7 +6,6 @@
   denialFlutter,
   denial,
   expectedRawEngine,
-  newerDriver ? null,
 }:
 let
   raw = denialFlutter.pinnedRawEngine;
@@ -44,28 +43,6 @@ runCommand "denial-engine-cache-contract"
         *) echo "Unexpected runtime libc: $path" >&2; exit 1 ;;
       esac
     done
-    ${lib.optionalString (newerDriver != null) ''
-      # Model the reported failure with the stable loader and newer Mesa in
-      # the same process. No graphics device or window is needed for dlopen.
-      required_glibc="$(readelf --version-info ${newerDriver} \
-        | sed -n 's/.*Name: GLIBC_\([0-9.]*\).*/\1/p' | sort -V | tail -n 1)"
-      host_glibc=${lib.versions.majorMinor pkgs.stdenv.cc.libc.version}
-      if [ -n "$required_glibc" ] \
-        && [ "$required_glibc" != "$host_glibc" ] \
-        && [ "$(printf '%s\n' "$host_glibc" "$required_glibc" | sort -V | tail -n 1)" = "$required_glibc" ]; then
-        if ${probe}/bin/denial-engine-probe \
-          ${engine}/out/host_release/libflutter_engine.so \
-          ${denial.dartShell}/lib/libapp.so --driver ${newerDriver} \
-          >mismatched-driver.log 2>&1; then
-          echo "Expected the older libc to reject the newer driver" >&2
-          exit 1
-        fi
-        grep -E 'GLIBC_[0-9.]+.*not found' mismatched-driver.log
-      else
-        echo "Newer driver does not require a newer libc; no mismatch to test" >mismatched-driver.log
-      fi
-    ''}
     mkdir -p $out
     cp engine-driver.log $out/
-    ${lib.optionalString (newerDriver != null) "cp mismatched-driver.log $out/"}
   ''

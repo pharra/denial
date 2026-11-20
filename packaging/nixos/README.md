@@ -56,16 +56,26 @@ Plugin tooling is a separate `denial-plugin-manager` flake package and
 exact locked Dart derivation in `PATH`; the main `pkgs.denial` closure does not
 contain the Plugin Manager or compiler kit.
 
-Flutter and Skia source revisions remain pinned by `SOURCE_LOCK.json`.
-Denial takes its private Flutter build helper definitions from its locked
-Nixpkgs source. The expensive engine/compiler build uses that pinned package set
-so its cache identity survives host updates. A small host-specific derivation
+Denial derives every output from one Nixpkgs input: its own packages, the
+module's `pkgs.denial`, and the Flutter build helper definitions. Select
+another set the usual way, by making it follow yours:
+
+```nix
+inputs.denial.inputs.nixpkgs.follows = "nixpkgs";
+```
+
+The whole evaluation then uses that set, consistently: the compositor, the
+shell and Settings, the engine, and the module's other packages. A host that
+keeps Denial's input as it is builds exactly the derivations CI publishes to
+the cache; one that follows another Nixpkgs rebuilds them against it.
+
+Flutter and Skia source revisions remain pinned by `SOURCE_LOCK.json`. The
+expensive engine/compiler build uses the Nixpkgs input without a consumer's
+overlays, so host overlays cannot change the producer, and a small derivation
 verifies the complete artifact manifest and adapts the engine and its matching
-Dart SDK to the host's loader and libraries. Compiler snapshots require the exact
-SDK hash, so the SDK stays paired with the engine even when another SDK reports
-the same Dart version. The compositor, shell and native Flutter apps use the
-host's package set. There is no need to make Denial's
-Nixpkgs input follow the host's input; doing so also changes the engine cache key.
+Dart SDK to the loader and libraries in use. Compiler snapshots require the
+exact SDK hash, so the SDK stays paired with the engine even when another SDK
+reports the same Dart version.
 
 Hosts below the producer's glibc or GNU compiler-runtime baseline, or using a
 different compiler family, build the engine with their own package set. To
@@ -78,10 +88,11 @@ programs.denial.engine.buildFromSource = true;
 Both paths consume the same exact source locks. The source option rebuilds the
 engine and does not affect the compositor's host dependency alignment.
 
-The standalone `denial.packages.x86_64-linux.denial` output still builds with
-Denial's own Nixpkgs lock for reproducible CI and direct flake builds. Use the
-module or overlay for NixOS integration so native dependencies follow the
-host:
+`denial.packages.x86_64-linux.denial` is the same derivation the module
+installs, built from the Nixpkgs input, which is what CI publishes and what
+the module's `pkgs.denial` evaluates to on a host that has not overridden the
+input. The overlay applies the same expressions to a package set of your
+choosing:
 
 ```nix
 {
@@ -148,15 +159,17 @@ checked-in configuration with `--accept-flake-config`.
 The separately published `denial-flutter-engine-raw` output contains the locked
 release engine, matching Dart SDK and compiler assets, with a complete checksum/mode
 inventory, architecture, source-lock and fetch-lock hashes, and the actual GN configuration
-hash. Its producer derivation is independent of the consumer's Nixpkgs and
-overlays. Nix verifies the signed cache output against that exact derivation;
-host adaptation verifies the manifest and every file before modifying copies.
-It removes producer library/loader paths and selects the host's dependencies.
+hash. Its producer derivation ignores a consumer's overlays and derives from
+the Nixpkgs input, so it is the same for every host that keeps that input. Nix
+verifies the signed cache output against that exact derivation; host adaptation
+verifies the manifest and every file before modifying copies. It removes
+producer library/loader paths and selects the host's dependencies.
 
-A newer compatible host normally downloads that raw output and builds only the
-small adaptation step, compositor and Dart applications. Cache misses build the
-pinned producer from its locked sources automatically. Older or explicitly
-source-selected hosts build the engine with their host package set instead.
+A host that keeps Denial's Nixpkgs input normally downloads that raw output and
+builds only the small adaptation step, compositor and Dart applications from the
+same cache. Cache misses build the pinned producer from its locked sources
+automatically. Older or explicitly source-selected hosts, and hosts that follow
+another Nixpkgs, build the engine with their own package set instead.
 
 A complete package cache hit still does not guarantee compatibility with a
 different host graphics stack.
@@ -166,11 +179,11 @@ after a host update, drivers loaded from `/run/opengl-driver` can require glibc
 symbols that the cached package's libc does not provide. Keep the module's
 default package for host dependency alignment.
 
-CI checks stable and the separately locked unstable package set, requiring one
-identical raw engine producer, host libc alignment, complete artifact verification
-and engine/AOT/Mesa loading. Its negative test models an older process loading a
-newer Mesa driver when the libc baselines differ. Actual graphics/session tests
-are recorded in [the validation results](VALIDATION.md).
+CI checks the Nixpkgs input, requiring one identical raw engine producer, host
+libc alignment, complete artifact verification and engine/AOT/Mesa loading. A
+host that follows another Nixpkgs runs the same checks against it. Actual
+graphics/session tests are recorded in
+[the validation results](VALIDATION.md).
 
 If startup reports GBM backend initialization failure for an already-open DRM
 device, the device was opened successfully. A GBM `No such file or directory`
