@@ -58,7 +58,6 @@
       sourceRevision = if gitRevision != null then gitRevision else "nar:${self.narHash or revisionBase}";
       localOverlay = import ./nix/overlay.nix {
         inherit version buildIdentity sourceRevision;
-        flutterNixpkgs = nixpkgs;
         pluginCollection = denialPlugins;
         inherit denialApps gpuiTouch;
       };
@@ -80,7 +79,6 @@
           pkgs = mkPkgs system;
           flutterMaintenanceSources = pkgs.callPackage ./nix/flutter-engine.nix {
             maintenanceOnly = true;
-            flutterNixpkgs = nixpkgs;
           };
         in
         {
@@ -97,8 +95,6 @@
           };
           denial-flutter = pkgs.denialFlutter;
           denial-flutter-engine = pkgs.denialFlutter.engine;
-          denial-flutter-engine-raw = pkgs.denialFlutter.pinnedRawEngine;
-          denial-flutter-engine-source-build = pkgs.denialFlutter.hostSourceEngine;
           denial-flutter-engine-source = flutterMaintenanceSources.engineSource;
           denial-flutter-depot-tools-source = flutterMaintenanceSources.depotToolsSource;
           denial-flutter-framework-source = flutterMaintenanceSources.fetchedFlutter;
@@ -113,6 +109,10 @@
         in
         {
           inherit (pkgs.denial.tests) path-contract;
+          engine-cache = pkgs.callPackage ./nix/tests/engine-cache.nix {
+            inherit (pkgs) denial;
+            inherit (pkgs) denialFlutter;
+          };
           locks = pkgs.callPackage ./nix/tests/locks.nix {
             source = ./.;
             flutterSource = pkgs.denialFlutter.flutterSource;
@@ -123,10 +123,6 @@
             inherit pkgs;
             module = self.nixosModules.denial;
             nixosSystem = nixpkgs.lib.nixosSystem;
-          };
-          engine-manifest = pkgs.callPackage ./nix/tests/engine-manifest.nix { };
-          engine-cache = pkgs.callPackage ./nix/tests/engine-cache.nix {
-            expectedRawEngine = pkgs.denialFlutter.pinnedRawEngine;
           };
         }
       );

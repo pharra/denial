@@ -8,12 +8,17 @@ boundaries may change before 1.0.
 
 ### Changed
 
-- On NixOS, Denial's flake takes one Nixpkgs input for the package, the module
-  and the Flutter build helpers. A system that wants another set makes that
-  input follow its own (`inputs.denial.inputs.nixpkgs.follows = "nixpkgs"`) and
-  everything is evaluated against it. The separate unstable input, and the
-  `denial-unstable`, `module-unstable` and `engine-cache-unstable` outputs
-  that came with it, are gone.
+- On NixOS, the whole desktop comes from one Nixpkgs: Denial's own packages,
+  the module's `pkgs.denial`, and the Flutter engine and SDK are built by the
+  set in use. A system that wants another set makes Denial's input follow its
+  own (`inputs.denial.inputs.nixpkgs.follows = "nixpkgs"`). The engine is no
+  longer published as a prebuilt artifact that each host re-links, so hosts
+  that follow another Nixpkgs build it from the locked sources instead of
+  reusing the cache. The `denial-flutter-engine-raw`,
+  `denial-flutter-engine-source-build`, `denial-unstable`,
+  `module-unstable` and `engine-cache-unstable` outputs, the separate unstable
+  input, and `programs.denial.engine.buildFromSource` are gone with the
+  adaptation machinery they supported.
 - Settings and Welcome are a new program, the same one on the desktop and the
   phones, written with GPUI. It comes with the `denial` package as before and
   `denial-settings` still starts it; its windows are now named

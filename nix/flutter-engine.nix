@@ -1,3 +1,6 @@
+# The locked Flutter SDK and release engine, built by the package set that
+# composes the desktop. One set means one libc, loader and graphics stack for
+# the engine and every process that maps it.
 {
   lib,
   pkgs,
@@ -6,11 +9,7 @@
   fetchurl,
   fetchzip,
   runCommand,
-  flutterNixpkgs ? pkgs.path,
   maintenanceOnly ? false,
-  # Retained for the isolated lab probe; normal packages use the pinned producer.
-  releaseEngineOverride ? null,
-  buildEngineFromSource ? false,
 }:
 
 let
@@ -73,7 +72,7 @@ let
   # Pin helper definitions independently of the native package set. Calling
   # them through the host's pkgs keeps libc and graphics dependencies aligned
   # with the drivers loaded from /run/opengl-driver, even on NixOS unstable.
-  flutterNix = flutterNixpkgs + "/pkgs/development/compilers/flutter";
+  flutterNix = pkgs.path + "/pkgs/development/compilers/flutter";
   mkCustomFlutter = pkgs.callPackage (flutterNix + "/flutter.nix");
   # These stay in the locked helper source rather than a downstream patch
   # series in this tree.
@@ -92,31 +91,9 @@ let
   ];
 
   sourceEngine = pkgs.callPackage ./flutter-engine-source.nix {
-    inherit flutterNixpkgs maintenanceOnly;
+    inherit maintenanceOnly;
   };
-  # Never import the consumer's overlays or native overrides into the producer.
-  # Its derivation stays identical when the host Nixpkgs changes.
-  enginePkgs = import flutterNixpkgs { system = stdenv.hostPlatform.system; };
-  pinnedRawEngine = enginePkgs.callPackage ./flutter-engine-raw.nix {
-    inherit flutterNixpkgs;
-  };
-  hostSupportsPinnedEngine = import ./engine-compatible.nix {
-    inherit lib;
-    libcVersion = stdenv.cc.libc.version;
-    compilerVersion = stdenv.cc.cc.version;
-    isGNU = stdenv.cc.isGNU or false;
-    inherit (pinnedRawEngine) minimumGlibc minimumCompilerRuntime;
-  };
-  usePinnedEngine = !buildEngineFromSource && hostSupportsPinnedEngine;
-  releaseEngine =
-    if releaseEngineOverride != null then
-      releaseEngineOverride
-    else if usePinnedEngine then
-      pkgs.callPackage ./flutter-engine-adapt.nix {
-        rawEngine = pinnedRawEngine;
-      }
-    else
-      sourceEngine;
+  releaseEngine = sourceEngine;
   # Compiler snapshots and platform kernels require the exact SDK hash, not
   # just the same Dart version. Keep the source-built SDK with its engine.
   dart = releaseEngine.dart or bootstrapDart;
@@ -205,8 +182,6 @@ let
           '';
           passthru = oldAttrs.passthru // {
             engine = releaseEngine;
-            inherit pinnedRawEngine;
-            hostSourceEngine = sourceEngine;
             engineSource = applicationEngineSource;
             depotToolsSource = sourceEngine.depotToolsSource;
             inherit fetchedFlutter flutterSource;
@@ -225,8 +200,6 @@ let
     wrapped = wrappedBase // {
       override = _: packages.wrapped;
       engine = releaseEngine;
-      inherit pinnedRawEngine;
-      hostSourceEngine = sourceEngine;
       engineSource = applicationEngineSource;
       depotToolsSource = sourceEngine.depotToolsSource;
       frameworkRevision = flutterRevision;
@@ -245,9 +218,6 @@ in
 if maintenanceOnly then
   maintenanceSources
 else
-  assert lib.assertMsg (
-    releaseEngineOverride == null || (releaseEngineOverride.sourceLockSha256 or null) == sourceLockHash
-  ) "Engine artifacts do not match SOURCE_LOCK.json";
   assert lib.assertMsg (
     nixLock.schema_version == 1
   ) "unsupported nix/flutter-engine-lock.json schema";

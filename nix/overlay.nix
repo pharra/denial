@@ -3,7 +3,6 @@
   version ? "0.0.0+unknown",
   buildIdentity ? "nix.unknown",
   sourceRevision ? "unknown",
-  flutterNixpkgs ? null,
   pluginCollection ? null,
   # The denial-apps and gpui-touch commits settings/SOURCE_LOCK.json names.
   denialApps ? null,
@@ -35,15 +34,7 @@ let
   };
 in
 {
-  denialFlutter = final.callPackage ./flutter-engine.nix (
-    final.lib.optionalAttrs (flutterNixpkgs != null) { inherit flutterNixpkgs; }
-  );
-  denialFlutterSource = final.callPackage ./flutter-engine.nix (
-    {
-      buildEngineFromSource = true;
-    }
-    // final.lib.optionalAttrs (flutterNixpkgs != null) { inherit flutterNixpkgs; }
-  );
+  denialFlutter = final.callPackage ./flutter-engine.nix { };
   denial = final.callPackage ./package.nix {
     src = cleanSrc;
     inherit version buildIdentity sourceRevision;

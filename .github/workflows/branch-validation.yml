@@ -48,7 +48,6 @@ jobs:
           nix build
           .#checks.x86_64-linux.locks
           .#checks.x86_64-linux.module
-          .#checks.x86_64-linux.engine-manifest
           --no-link --print-build-logs
 
   # Dev builds each push whose build inputs changed. Main builds its
@@ -233,11 +232,9 @@ jobs:
             nix build \
               .#denial \
               .#denial-flutter \
-              .#denial-flutter-engine-raw \
               .#denial-plugin-manager \
               .#checks.x86_64-linux.locks \
               .#checks.x86_64-linux.module \
-              .#checks.x86_64-linux.engine-manifest \
               .#checks.x86_64-linux.engine-cache \
               .#checks.x86_64-linux.path-contract \
               --accept-flake-config \
@@ -247,7 +244,7 @@ jobs:
               --print-out-paths \
               2> >(tee "$EVIDENCE_ROOT/nix-build.txt" >&2)
           )
-          ((${#nix_paths[@]} == 9))
+          ((${#nix_paths[@]} == 7))
           for path in "${nix_paths[@]}"; do
             [[ "$path" == /nix/store/* ]]
           done

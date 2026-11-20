@@ -70,23 +70,11 @@ keeps Denial's input as it is builds exactly the derivations CI publishes to
 the cache; one that follows another Nixpkgs rebuilds them against it.
 
 Flutter and Skia source revisions remain pinned by `SOURCE_LOCK.json`. The
-expensive engine/compiler build uses the Nixpkgs input without a consumer's
-overlays, so host overlays cannot change the producer, and a small derivation
-verifies the complete artifact manifest and adapts the engine and its matching
-Dart SDK to the loader and libraries in use. Compiler snapshots require the
-exact SDK hash, so the SDK stays paired with the engine even when another SDK
-reports the same Dart version.
-
-Hosts below the producer's glibc or GNU compiler-runtime baseline, or using a
-different compiler family, build the engine with their own package set. To
-deliberately use this path on any host:
-
-```nix
-programs.denial.engine.buildFromSource = true;
-```
-
-Both paths consume the same exact source locks. The source option rebuilds the
-engine and does not affect the compositor's host dependency alignment.
+engine is another package of the set in use, so it links the same libc, loader
+and graphics libraries as the compositor that maps it, and no adaptation step
+rewrites its ELF paths. Compiler snapshots require the exact SDK hash, so the
+Dart SDK stays paired with the engine even when another SDK reports the same
+Dart version.
 
 `denial.packages.x86_64-linux.denial` is the same derivation the module
 installs, built from the Nixpkgs input, which is what CI publishes and what
@@ -156,32 +144,22 @@ and signing key because Nix does not apply the `nixConfig` of a flake used only
 as an input. Direct commands against the Denial flake can accept its identical
 checked-in configuration with `--accept-flake-config`.
 
-The separately published `denial-flutter-engine-raw` output contains the locked
-release engine, matching Dart SDK and compiler assets, with a complete checksum/mode
-inventory, architecture, source-lock and fetch-lock hashes, and the actual GN configuration
-hash. Its producer derivation ignores a consumer's overlays and derives from
-the Nixpkgs input, so it is the same for every host that keeps that input. Nix
-verifies the signed cache output against that exact derivation; host adaptation
-verifies the manifest and every file before modifying copies. It removes
-producer library/loader paths and selects the host's dependencies.
+A host that keeps Denial's Nixpkgs input downloads the compositor, the shell,
+Settings and the engine from the same cache. One that follows another Nixpkgs
+builds them from the locked sources with that set, including the engine. No
+engine artifact is re-linked or verified outside Nix's own derivation and
+signature contract.
 
-A host that keeps Denial's Nixpkgs input normally downloads that raw output and
-builds only the small adaptation step, compositor and Dart applications from the
-same cache. Cache misses build the pinned producer from its locked sources
-automatically. Older or explicitly source-selected hosts, and hosts that follow
-another Nixpkgs, build the engine with their own package set instead.
+Overriding `programs.denial.package` with a package built from another Nixpkgs
+mixes two sets again: after a host update, drivers loaded from
+`/run/opengl-driver` can require glibc symbols the package's libc does not
+provide. The module's default package is built from the system's set.
 
-A complete package cache hit still does not guarantee compatibility with a
-different host graphics stack.
-Overriding `programs.denial.package` with
-`denial.packages.${system}.denial` retains Denial's pinned native dependencies;
-after a host update, drivers loaded from `/run/opengl-driver` can require glibc
-symbols that the cached package's libc does not provide. Keep the module's
-default package for host dependency alignment.
-
-CI checks the Nixpkgs input, requiring one identical raw engine producer, host
-libc alignment, complete artifact verification and engine/AOT/Mesa loading. A
-host that follows another Nixpkgs runs the same checks against it. Actual
+CI checks the Nixpkgs input: source locks, module integration with host
+dependencies, the engine's build configuration, the packaged paths, and a
+runtime contract that loads the engine and the shell bundle with the set's
+Mesa driver in one process and requires a single libc in the composed closure.
+A host that follows another Nixpkgs runs the same checks against it. Actual
 graphics/session tests are recorded in
 [the validation results](VALIDATION.md).
 

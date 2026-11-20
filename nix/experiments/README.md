@@ -1,100 +1,75 @@
-# Portable engine experiment
+# Why the portable-engine experiment was retired
 
-This retains the original lab experiment, not a supported package selection or
-public cache contract. Normal packages now use the source-built pinned producer
-and verified host adapter in `nix/flutter-engine-{raw,adapt}.nix`.
-The internal `releaseEngineOverride` argument lets a test overlay reuse verified
-release engine/compiler outputs while building the compositor and Dart apps
-with the host's Nixpkgs.
-
-`portable-engine.nix` copies raw artifacts, verifies the engine checksum, removes
-old ELF search paths on those copies, and runs the host's `autoPatchelfHook`.
-The immutable raw artifact has the same store identity across host package sets;
-the adapted output has a different identity for each host. No loader shim is
-needed. The raw artifact's minimum glibc requirement still matters: adapting ELF
-paths cannot make a binary run against an older, unsupported libc.
-
-## Inputs and example
-
-Use artifacts from a release build verified against the repository's exact
-`prebuilt/flutter-engine/SOURCE_LOCK.json`. `engineRoot` must contain
-`out/host_release/`, including the engine, ICU data, snapshots and tools used by
-the Flutter application builder (`gen_snapshot`, `impellerc`, `font-subset`,
-`flutter_patched_sdk`, `gen/dart-pkg/sky_engine`, `shader_lib`, Flutter Linux
-headers/library and `gen/const_finder.dart.snapshot`). The Dart SDK is supplied
-separately from the lock-matched maintenance package. Keep a matching release
-shell bundle for the probe.
-
-For example, a local `experiment.nix` next to a Denial checkout named `source`
-and verified artifacts below `inputs`:
+Denial builds its locked Flutter SDK, engine and every native component from
+**one package set**: the flake's `nixpkgs` input, which a consumer replaces the
+usual way.
 
 ```nix
-let
-  denial = builtins.getFlake "path:${toString ./source}";
-  host = builtins.getFlake "github:NixOS/nixpkgs/<exact-host-revision>";
-  base = import host { system = "x86_64-linux"; };
-  maintenance = base.callPackage ./source/nix/flutter-engine.nix {
-    flutterNixpkgs = denial.inputs.nixpkgs;
-    maintenanceOnly = true;
-  };
-  experiment = import ./source/nix/experiments/portable-engine.nix {
-    pkgs = base;
-    engineRoot = ./inputs/engine;
-    bundle = ./inputs/bundle;
-    embedderHeader = ./inputs/engine/out/host_release/flutter_embedder.h;
-    expectedEngineSha256 = "<verified engine SHA-256>";
-    dartSdk = maintenance.dart;
-  };
-  pkgs = import host {
-    system = "x86_64-linux";
-    overlays = [
-      denial.overlays.default
-      (final: _: {
-        denialFlutter = final.callPackage ./source/nix/flutter-engine.nix {
-          flutterNixpkgs = denial.inputs.nixpkgs;
-          releaseEngineOverride = experiment.engine;
-        };
-      })
-    ];
-  };
-in {
-  inherit (experiment) engine runtime probe identity;
-  package = pkgs.denial;
-}
+inputs.denial.inputs.nixpkgs.follows = "nixpkgs";
 ```
 
-Build the probe and runtime, then run against a render node as a user with
-access to it. This creates no window or scanout:
+The retired experiment in this directory took the opposite approach. It built
+the engine once, with its own pinned Nixpkgs, published it as a self-contained
+"raw" artifact, and re-linked a copy to each host's loader and graphics
+libraries at install time. Together with a compatibility gate, an artifact
+manifest, the cache-contract checks and a negative driver test, that machinery
+existed to make a single engine binary usable on hosts whose Nixpkgs differed
+from the producer's. It is gone; what follows records why.
 
-```sh
-nix build --impure --file experiment.nix probe --out-link probe
-nix build --impure --file experiment.nix runtime --out-link runtime
-./probe/bin/denial-portable-engine-probe \
-  ./runtime/lib/libflutter_engine.so ./runtime/lib/libapp.so /dev/dri/renderD128
-nix build --impure --file experiment.nix package --out-link package
-./package/bin/denial-session --check
-```
+## What it was for
 
-The probe checks the Denial extension symbols, Flutter procedure table, release
-AOT data loading, GBM driver loading, and surfaceless EGL/GLES initialization.
-It does not initialize Flutter or execute Dart. A full Denial session on each
-actual host graphics stack is therefore required too. Record the process's
-mapped engine, AOT library, libc and Mesa driver and the session service health.
-Visual validation remains user-owned.
+A Denial process has exactly one loader and one libc. The Mesa driver it loads
+at runtime, however, comes from the host's `/run/opengl-driver`, not from
+Denial's closure. When the package had been built against an older libc than
+the driver required, `dlopen` failed with `GLIBC_* not found` and libgbm
+reported the misleading `ENOENT` that Denial surfaced as a GBM initialization
+failure. The experiment reused one expensive build across hosts by rewriting
+ELF search paths, and the gate fell back to a source build when the host was
+too old for the artifact.
 
-## Cache and production boundary
+Rationale, then: publish one engine, adapt it per host, verify every byte, and
+test the boundary. The motivation was the cost of the engine build, not a
+property the desktop needed.
 
-The lab uses `nix copy` to round-trip the raw store path through an isolated file
-binary cache. This proves reuse of the same bytes; it does not publish to Cachix
-or establish a production artifact supply chain.
+## Why it was retired
 
-The normal producer binds a complete manifest to the locked sources and recorded
-build configuration and relies on Nix's exact derivation/cache signature contract.
-It has a source-build fallback and host compatibility checks. This retained
-experiment validates the engine
-checksum and rejects an override stamped with a different source-lock hash;
-that stamp is supplied by the test harness, not independently authenticated
-producer provenance. Only x86_64 release mode is covered here.
+Every one of those mechanisms is a workaround for mixing package sets:
 
-See [the validation record](../../packaging/nixos/VALIDATION.md) for the tested
-systems, results and limitations.
+- The engine's producer had to ignore the consumer's overlays, so the engine
+  and the compositor that maps it could disagree about libc, GL and GBM.
+- The adaptation step rewrote loader and library paths, so the engine's
+  identity no longer matched any single package set, and its correctness
+  depended on a manifest, a checksum inventory and a compatibility baseline.
+- The compatibility gate and the `buildFromSource` option then had to decide,
+  per host, which of two provenance paths applied, and the negative driver
+  test had to synthesize a mismatch to keep that decision honest.
+- A second, unstable Nixpkgs existed only to exercise those decisions.
+
+Building one set removes the mismatch instead of detecting it. The engine, the
+compositor, the shell, Settings and the host's drivers are then products of the
+same Nixpkgs: the same libc is the only one that can be loaded, and there is
+nothing to adapt, gate or verify. Denial's runtime fixes stay in Denial's code
+instead of in ELF rewriting.
+
+The trade is explicit: a host builds the engine when its Nixpkgs differs from
+the one CI published, and the public cache covers hosts that keep Denial's
+input. That is the ordinary flake contract, and it is cheaper than a class of
+startup failures that only appears after a host update.
+
+## What replaced it
+
+- `nix/flutter-engine.nix` / `nix/flutter-engine-source.nix` build the locked
+  engine with the package set in use; `denialFlutter.engine` is that build.
+  `SOURCE_LOCK.json` still pins the exact Flutter, Skia and engine sources.
+- The NixOS module installs `pkgs.denial`, built from the same set as the
+  system's drivers.
+- The module check asserts that host dependencies reach the compositor and the
+  engine, that the engine is this set's own source build with Denial's
+  Impeller-only configuration, and that the Dart SDK stays paired with it.
+- `checks.engine-cache` keeps the runtime half of the old contract: the engine
+  and the shell bundle load with this set's Mesa driver in one process, and the
+  composed runtime holds exactly one libc. It still guards a published engine,
+  now the one the cache holds for this set.
+- `nix/experiments/` keeps this note only. The portable artifact derivation is
+  gone; the reusable probe it shared with the runtime check stays as
+  `nix/engine-probe.nix`.

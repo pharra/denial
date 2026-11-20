@@ -5,6 +5,14 @@ contracts, and non-visual runtime health. Visual validation remains user-owned
 and was not performed. The newest supported-path validation appears first;
 earlier sections describe the implementations tested at those dates.
 
+> **Retired design.** The pinned engine producer, its host adaptation, the
+> compatibility gate and the cache-contract checks described below were removed:
+> the engine is now built from the same Nixpkgs as the compositor, so no
+> cross-set loader or libc mismatch can exist. See
+> [`nix/experiments/README.md`](../../nix/experiments/README.md) for the
+> reasoning and for what replaced them. The measurements and incident records
+> stay as history.
+
 ## Supported engine cache (2026-10-03)
 
 The default module was built and booted on `.18` with the production packaging

@@ -1,10 +1,10 @@
-# Source builder shared by the pinned cache producer and host-source fallback.
+# The locked release engine, built by the package set that runs it.
 {
   lib,
   pkgs,
   stdenv,
   fetchurl,
-  flutterNixpkgs ? pkgs.path,
+  runCommand,
   maintenanceOnly ? false,
 }:
 let
@@ -17,7 +17,7 @@ let
     builtins.readFile ../prebuilt/flutter-engine/linux-x64-release/ENGINE_REVISION
   );
   dartVersion = nixLock.dart.version;
-  flutterNix = flutterNixpkgs + "/pkgs/development/compilers/flutter";
+  flutterNix = toString pkgs.path + "/pkgs/development/compilers/flutter";
   dartHash =
     {
       x86_64-linux = nixLock.dart.hash;
@@ -105,7 +105,8 @@ let
           if [[ -s $CCACHE_STATSLOG ]]; then
             ${lib.getExe pkgs.ccache} --show-log-stats
           fi
-        '' + (oldAttrs.postBuild or "");
+        ''
+        + (oldAttrs.postBuild or "");
         configureFlags = (oldAttrs.configureFlags or [ ]) ++ [
           "--ccache"
           "--slimpeller"
@@ -154,20 +155,41 @@ assert lib.assertMsg (
     && nixLock.engine.revision == engineVersion
   )
 ) "Engine source locks differ; run tools/denial-nix refresh-engine-lock";
-rawEngine.overrideAttrs (oldAttrs: {
-  runtimeModes = [ "release" ];
-  altRuntimeMode = "release";
-  installPhase = ''
-    runHook preInstall
-    mkdir --parents $out/out
-    ln --symbolic ${rawEngine.release}/out/${rawEngine.release.outName} \
-      $out/out/${rawEngine.release.outName}
-    runHook postInstall
-  '';
-  passthru = oldAttrs.passthru // {
-    sourceLockSha256 = sourceLockHash;
-    depotToolsSource = engineTools.depot_tools;
-    nativeLibc = stdenv.cc.libc;
-    buildStrategy = "host-source";
-  };
-})
+rawEngine.overrideAttrs (
+  finalAttrs: oldAttrs: {
+    runtimeModes = [ "release" ];
+    altRuntimeMode = "release";
+    installPhase = ''
+      runHook preInstall
+      mkdir --parents $out/out
+      ln --symbolic ${rawEngine.release}/out/${rawEngine.release.outName} \
+        $out/out/${rawEngine.release.outName}
+      runHook postInstall
+    '';
+    passthru = oldAttrs.passthru // {
+      sourceLockSha256 = sourceLockHash;
+      depotToolsSource = engineTools.depot_tools;
+      nativeLibc = stdenv.cc.libc;
+      buildStrategy = "host-source";
+      runtimeMode = "release";
+      outName = "host_release";
+      isOptimized = true;
+      release = finalAttrs.finalPackage;
+      # The compile step before the release layout is linked into place, for
+      # checks of the configuration the engine is built with.
+      engineBuild = rawEngine.release;
+      dart =
+        runCommand "denial-engine-dart-sdk-${dartVersion}"
+          {
+            version = dartVersion;
+            meta = {
+              mainProgram = "dart";
+              platforms = [ "x86_64-linux" ];
+            };
+          }
+          ''
+            ln --symbolic ${finalAttrs.finalPackage}/out/host_release/dart-sdk $out
+          '';
+    };
+  }
+)
