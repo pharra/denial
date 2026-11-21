@@ -160,35 +160,46 @@ class DesktopPopupSurfaceLayers extends StatelessWidget {
                         pixelGridOrigin: pixelGridOrigin,
                         alignSizeToDevicePixels: true,
                         globalClipRect: outputClip,
-                        // The window primitive composites the client
-                        // over its material per pixel, like a toplevel.
-                        child: WindowPlane.texture(
-                          texture: WindowPlaneTexture(
-                            id: layer.textureId,
-                            bufferSize: Size(
-                              layer.width.toDouble(),
-                              layer.height.toDouble(),
-                            ),
-                            source: Rect.fromLTWH(
-                              layer.textureSourceX,
-                              layer.textureSourceY,
-                              layer.textureSourceWidth,
-                              layer.textureSourceHeight,
-                            ),
-                            transform: layer.transform,
-                            opacity: layer.opacity,
-                          ),
-                          backdrop: _popupBackdrop(
-                            ShellTheme.of(context),
-                            layer,
-                          ),
-                          // A client-drawn shadow lies outside the popup's
-                          // window geometry and stays unfrosted.
-                          materialRegion: layer.windowGeometryFraction,
-                          filterQuality: filterQuality,
-                          presentationScale: devicePixelRatio,
-                          pixelGridOrigin: pixelGridOrigin,
-                        ),
+                        // A client-positioned overlay owns every pixel it
+                        // draws, so its popups are client surfaces too: no
+                        // window material, glass or frame behind them.
+                        child: window.isClientOverlay
+                            ? SurfaceLayerTexture(
+                                layer: layer,
+                                filterQuality: filterQuality,
+                                presentationScale: devicePixelRatio,
+                                pixelGridOrigin: pixelGridOrigin,
+                              )
+                            // The window primitive composites the client
+                            // over its material per pixel, like a toplevel.
+                            : WindowPlane.texture(
+                                texture: WindowPlaneTexture(
+                                  id: layer.textureId,
+                                  bufferSize: Size(
+                                    layer.width.toDouble(),
+                                    layer.height.toDouble(),
+                                  ),
+                                  source: Rect.fromLTWH(
+                                    layer.textureSourceX,
+                                    layer.textureSourceY,
+                                    layer.textureSourceWidth,
+                                    layer.textureSourceHeight,
+                                  ),
+                                  transform: layer.transform,
+                                  opacity: layer.opacity,
+                                ),
+                                backdrop: _popupBackdrop(
+                                  ShellTheme.of(context),
+                                  layer,
+                                ),
+                                // A client-drawn shadow lies outside the
+                                // popup's window geometry and stays
+                                // unfrosted.
+                                materialRegion: layer.windowGeometryFraction,
+                                filterQuality: filterQuality,
+                                presentationScale: devicePixelRatio,
+                                pixelGridOrigin: pixelGridOrigin,
+                              ),
                       ),
                 ],
               ),

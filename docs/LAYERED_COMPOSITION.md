@@ -33,6 +33,9 @@ Rules:
 
 - Glass is a cut, never an effect inside a slice. Glass over glass is two
   material cuts in order.
+- A client-positioned overlay, such as a game HUD or a deck tracker, is drawn
+  as external texture entries rather than a window cut. The client owns every
+  pixel it submits, so no window material, glass or frame is placed behind it.
 - Opacity, transforms, clips and saveLayers inside a slice behave as today.
 - Slice identity = position in the per-frame entry list; a slice is reused
   when its bounds and display list are equal to the previous frame's.

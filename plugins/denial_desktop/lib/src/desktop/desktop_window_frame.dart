@@ -915,21 +915,19 @@ class _DesktopWindowContent extends ConsumerWidget {
 
   Widget _buildSurface(BuildContext context, WidgetRef ref) {
     final theme = ShellTheme.of(context);
-    // A client-positioned overlay draws itself over the window it annotates:
-    // no Denial material, frame, rounded corners or glass behind it, so the
-    // client's own alpha is what the user sees.
+    // A client-positioned overlay is an image the client draws over the window
+    // it annotates, such as a game HUD or a deck tracker. Denial's window
+    // primitive composites that client behind the window material, which fills
+    // every pixel the client left transparent; draw the client's own surface
+    // tree instead, as a popup surface is drawn.
     if (window.isClientOverlay) {
-      return _DesktopSurfaceTexture(
+      return WindowSurfaceTree(
         window: window,
-        allowDirectLayers: allowDirectLayers,
-        smooth: smooth,
+        includePopups: true,
+        filterQuality: smooth ? FilterQuality.medium : FilterQuality.none,
         presentationScale:
             presentationScale ?? MediaQuery.devicePixelRatioOf(context),
         pixelGridOrigin: pixelGridOrigin,
-        radius: 0,
-        frameWidth: 0,
-        frameColor: const Color(0x00000000),
-        backdrop: null,
       );
     }
     final windowOpacity = active

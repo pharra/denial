@@ -333,7 +333,9 @@ class DenialWindow {
   /// An undecorated X11 surface the client positions itself: a game HUD, a deck
   /// tracker, an input overlay. It belongs to the window it annotates rather
   /// than to a task of its own, so the shell draws it but never offers it as an
-  /// application to switch to.
+  /// application to switch to. It draws its own surface tree: Denial's window
+  /// material composites client content behind a window backing, which would
+  /// fill the pixels such a client leaves transparent.
   bool get isClientOverlay =>
       suppressAnimations && !isLayerShell && !isPopupSurface;
 

@@ -169,6 +169,12 @@ boundaries may change before 1.0.
 
 ### Fixed
 
+- A floating overlay such as a game HUD or deck tracker shows the client's own
+  transparency again. Denial drew such a window through its window material,
+  whose backing covered every pixel the client left transparent, so a tracker
+  over a game appeared as a black rectangle; an overlay the client positions
+  itself is now drawn as the client's surface tree, like a popup surface, with
+  no material, glass or frame behind it.
 - Xwayland overlays that ask to float, such as game HUDs and deck trackers, now
   keep the position and size they request instead of a saved or centered
   placement, and they stay out of managed layouts. A tracker can therefore sit
