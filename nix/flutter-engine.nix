@@ -91,9 +91,15 @@ let
     "deregister-pub-dependencies-artifact.patch"
   ];
 
-  sourceEngine = pkgs.callPackage ./flutter-engine-source.nix {
-    inherit flutterNixpkgs maintenanceOnly;
-  };
+  # Live UI development needs both a JIT engine and, for profiling, an
+  # optimized engine of the same locked source. Neither is published for the
+  # host package set, so both are built on demand from that source.
+  sourceEngineFor =
+    engineMode:
+    pkgs.callPackage ./flutter-engine-source.nix {
+      inherit flutterNixpkgs maintenanceOnly engineMode;
+    };
+  sourceEngine = sourceEngineFor "release";
   # Never import the consumer's overlays or native overrides into the producer.
   # Its derivation stays identical when the host Nixpkgs changes.
   enginePkgs = import flutterNixpkgs { system = stdenv.hostPlatform.system; };
@@ -227,6 +233,10 @@ let
       engine = releaseEngine;
       inherit pinnedRawEngine;
       hostSourceEngine = sourceEngine;
+      # The SDK the live development runtime may point at, and the JIT and
+      # profile engines `denial-ui` installs beside it.
+      debugEngine = sourceEngineFor "debug";
+      profileEngine = sourceEngineFor "profile";
       engineSource = applicationEngineSource;
       depotToolsSource = sourceEngine.depotToolsSource;
       frameworkRevision = flutterRevision;

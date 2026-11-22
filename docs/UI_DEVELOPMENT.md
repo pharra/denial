@@ -108,6 +108,28 @@ Install it from the Denial repository:
 sudo pacman -S denial-ui-development
 ```
 
+On NixOS, enable the module option instead. It links the same package
+(`denial.packages.x86_64-linux.denial-ui-development`, or
+`pkgs.denialUiDevelopment` from the overlay) into the compositor's own package,
+so `denialctl` and `denial-ui` find it beside themselves the way a system
+installation does:
+
+```nix
+programs.denial.uiDevelopment.enable = true;
+```
+
+That package builds the JIT engine from Denial's locked Flutter source rather
+than shipping a prebuilt one, so its first build is long; `programs.denial.
+uiDevelopment.profile = true` adds the AOT profile engine the profile workflow
+below needs, which is a second engine build. Flutter's GTK desktop embedder is
+not built at all: Denial runs the raw embedder, and the GTK shell is both most
+of the build and the part that stops compiling with newer GTK. The packaged
+shell, its engine and the login session are unchanged; the development runtime
+is a separate bundle the compositor switches to on request. `denialctl ui
+setup` clones the repository recorded by the installed package before
+overlaying the template, so a build from a fork or a private checkout also sets
+`programs.denial.uiDevelopment.sourceRemote` to that repository.
+
 This is a self-contained, Denial-scoped toolchain rather than a dependency on
 an arbitrary system Flutter installation. Flutter, Dart, the engine ABI, and
 Denial's engine extensions remain one tested generation. The package retains

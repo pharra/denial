@@ -7,11 +7,25 @@
 
 let
   cfg = config.programs.denial;
+  # An enabled development runtime joins the compositor's own prefix, where
+  # `denialctl` finds it, instead of relying on session variables that a
+  # logged-in session never sees.
+  denialPackage =
+    if cfg.uiDevelopment.enable then
+      pkgs.denial.override {
+        uiDevelopment = cfg.uiDevelopment.package;
+        uiDevelopmentSourceRemote = cfg.uiDevelopment.sourceRemote;
+      }
+    else
+      pkgs.denial;
 in
 {
   options.programs.denial = {
     enable = lib.mkEnableOption "Denial, a Flutter-native Wayland compositor";
-    package = lib.mkPackageOption pkgs "denial" { };
+    package = lib.mkPackageOption pkgs "denial" { } // {
+      default = denialPackage;
+      defaultText = lib.literalExpression "pkgs.denial";
+    };
 
     engine.buildFromSource = lib.mkOption {
       type = lib.types.bool;
@@ -27,6 +41,43 @@ in
     plugins = {
       enable = lib.mkEnableOption "Denial's plugin development and composition tools";
       package = lib.mkPackageOption pkgs "denialPluginManager" { };
+    };
+
+    uiDevelopment = {
+      enable = lib.mkEnableOption ''
+        Denial's live Flutter UI development runtime
+      '';
+      package = lib.mkOption {
+        type = lib.types.package;
+        default =
+          if cfg.uiDevelopment.profile then pkgs.denialUiDevelopmentProfile else pkgs.denialUiDevelopment;
+        defaultText = lib.literalExpression "pkgs.denialUiDevelopment";
+        description = ''
+          Package providing the development runtime. Its default adds the
+          profile engine only when {option}`profile` is enabled.
+        '';
+      };
+
+      profile = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Install the AOT profile engine as well, for building and profiling
+          the shell in profile mode. It is a second full engine build, and
+          live editing with `denialctl ui setup` does not need it.
+        '';
+      };
+
+      sourceRemote = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "https://github.com/denialwm/denial.git";
+        description = ''
+          Repository `denialctl ui setup` clones the version-matched revision
+          from. Unset keeps the official repository, which is wrong when this
+          package was built from a fork or a private checkout.
+        '';
+      };
     };
 
     polkitAgent = {

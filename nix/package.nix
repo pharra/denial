@@ -23,6 +23,11 @@
   version ? "0.0.0+unknown",
   buildIdentity ? "nix.unknown",
   sourceRevision ? "unknown",
+  git,
+  # Denial's live UI development runtime, merged into this package's prefix so
+  # `denialctl` finds it where a system installation keeps it.
+  uiDevelopment ? null,
+  uiDevelopmentSourceRemote ? null,
 }:
 
 let
@@ -43,6 +48,11 @@ let
     ];
     inherit version buildIdentity;
   };
+  # A package built from a fork publishes its revision there, not upstream, so
+  # `denialctl ui setup` learns the repository from the installation.
+  uiDevelopmentSourceRemoteFlag = lib.optionalString (
+    uiDevelopmentSourceRemote != null
+  ) "--set DENIAL_UI_SOURCE_REMOTE ${lib.escapeShellArg uiDevelopmentSourceRemote}";
   # Vendor the development dependency from the locked multi-package collection.
   uiSourceFor =
     roots:
@@ -95,7 +105,10 @@ let
     version = "0.0.0";
   };
   nativeApp = callPackage ./native-app.nix {
-    src = sourceFor [ "native_app" "compositor" ];
+    src = sourceFor [
+      "native_app"
+      "compositor"
+    ];
   };
   polkitApp = callPackage ./polkit-app.nix {
     inherit nativeApp;
@@ -328,6 +341,27 @@ stdenvNoCC.mkDerivation (finalAttrs: {
         ]
       }
 
+    ${lib.optionalString (uiDevelopment != null) ''
+      # A system installation keeps the development runtime in the same prefix
+      # as `denialctl`, which finds it relative to itself. Nix splits packages
+      # into separate store paths, so this one links the runtime in and tells
+      # the clients the root they resolve from. `denialctl` starts the client
+      # only when it is a regular executable file, so the wrappers are
+      # installed rather than linked.
+      install -m755 ${uiDevelopment}/bin/denial-ui $out/bin/denial-ui
+      install -m755 ${uiDevelopment}/bin/denial-flutter $out/bin/denial-flutter
+      mkdir --parents $out/lib/denial $out/share/denial
+      ln --symbolic ${uiDevelopment}/lib/denial/ui-development \
+        $out/lib/denial/ui-development
+      ln --symbolic ${uiDevelopment}/share/denial/ui-development \
+        $out/share/denial/ui-development
+      wrapProgram $out/bin/denialctl \
+        --set DENIAL_UI_DEVELOPMENT_ROOT "$out/lib/denial/ui-development" \
+        --set DENIAL_UI_SOURCE_TEMPLATE "$out/share/denial/ui-development/workspace" \
+        --set DENIAL_UI_TOOL "$out/bin/denial-ui" \
+        --set DENIAL_UI_GIT ${git}/bin/git ${uiDevelopmentSourceRemoteFlag}
+    ''}
+
     runHook postInstall
   '';
 
@@ -387,6 +421,26 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       pluginBuildKit
       ;
     inherit buildIdentity sourceRevision;
+    # The editable live-development workspace and the sources of the client
+    # that prepares it, for the optional denial-ui-development package.
+    uiWorkspaceSource = uiSourceFor [
+      "dart_shell"
+      "packages/denial_sdk"
+      "packages/denial_flutter_sdk"
+      "plugins/denial_top_bar"
+      "plugins/denial_desktop"
+      "plugins/denial_launcher"
+      "plugins/denial_clock"
+      "plugins/denial_pets"
+      "plugins/builtins.yaml"
+      "protocol/generated/dart"
+      "LICENSE"
+      "prebuilt/flutter-engine/SOURCE_LOCK.json"
+    ];
+    compositorSource = sourceFor [
+      "compositor"
+      "protocol"
+    ];
     pluginManager = callPackage ./plugin-manager-package.nix {
       denial = finalAttrs.finalPackage;
       inherit

@@ -19,6 +19,19 @@ boundaries may change before 1.0.
 
 ### Added
 
+- Live Flutter UI development is available on NixOS.
+  `programs.denial.uiDevelopment.enable` installs the `denial-ui-development`
+  package, which also appears as `denial-ui-development` in the flake's
+  packages and as `pkgs.denialUiDevelopment` in the overlay, into the
+  compositor's own package, where `denialctl` and `denial-ui` look for it, so
+  no session variable or new login is needed. It carries the native `denial-ui`
+  client, a JIT engine built from the locked Flutter source, the matching
+  Flutter and Dart toolchain with the shell's locked Pub dependencies, and
+  the version-matched workspace template. `programs.denial.uiDevelopment.
+  profile = true` adds the AOT profile engine as a second engine build.
+  Flutter's GTK desktop embedder, which Denial never loads, is skipped. The
+  engine builds from source on first use, so enabling the option is a long
+  first build; the packaged shell and its engine are unchanged.
 - An app size apart from the shell's (`apps.scale`, 1 to 3). Apps opened
   after a change draw that many times larger than the screen's scale, at full
   sharpness; X11 apps follow through their DPI. The shell and Droidloom keep

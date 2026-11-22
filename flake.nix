@@ -61,6 +61,11 @@
         flutterNixpkgs = nixpkgs;
         pluginCollection = denialPlugins;
         inherit denialApps gpuiTouch;
+        # `denialctl ui setup` clones this branch and checks out the recorded
+        # revision, so the development package needs a published ref name and
+        # the commit itself, without the dirty-tree suffix.
+        uiDevelopmentSourceRef = "main";
+        uiDevelopmentSourceRevision = revisionBase;
       };
       mkPkgs =
         system:
@@ -95,6 +100,8 @@
           denial = pkgs.denial;
           denial-unstable = unstablePkgs.denial;
           denial-plugin-manager = pkgs.denialPluginManager;
+          denial-ui-development = pkgs.denialUiDevelopment;
+          denial-ui-development-profile = pkgs.denialUiDevelopmentProfile;
           denial-cachix-cli = pkgs.cachix;
           denial-nix-maintenance-tools = pkgs.buildEnv {
             name = "denial-nix-maintenance-tools";

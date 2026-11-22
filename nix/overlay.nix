@@ -8,6 +8,9 @@
   # The denial-apps and gpui-touch commits settings/SOURCE_LOCK.json names.
   denialApps ? null,
   gpuiTouch ? null,
+  # The branch `denialctl ui setup` clones before checking out the revision.
+  uiDevelopmentSourceRef ? "main",
+  uiDevelopmentSourceRevision ? sourceRevision,
 }:
 
 final: _prev:
@@ -53,4 +56,26 @@ in
     gpuiTouchSrc = gpuiTouch;
   };
   denialPluginManager = final.denial.pluginManager;
+  # Optional live UI development: the native client, a JIT engine, the pinned
+  # toolchain and the editable workspace template.
+  denialUiDevelopment = final.callPackage ./ui-development.nix {
+    inherit version;
+    sourceRevision = uiDevelopmentSourceRevision;
+    sourceRef = uiDevelopmentSourceRef;
+    denialFlutter = final.denialFlutter;
+    workspace = final.denial.uiWorkspaceSource;
+    compositorSrc = final.denial.compositorSource;
+    withProfileEngine = false;
+  };
+  # The same package with the profile engine, for the performance-analysis
+  # workflow. It is a second full engine build, so it stays opt-in.
+  denialUiDevelopmentProfile = final.callPackage ./ui-development.nix {
+    inherit version;
+    sourceRevision = uiDevelopmentSourceRevision;
+    sourceRef = uiDevelopmentSourceRef;
+    denialFlutter = final.denialFlutter;
+    workspace = final.denial.uiWorkspaceSource;
+    compositorSrc = final.denial.compositorSource;
+    withProfileEngine = true;
+  };
 }

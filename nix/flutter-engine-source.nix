@@ -6,6 +6,9 @@
   fetchurl,
   flutterNixpkgs ? pkgs.path,
   maintenanceOnly ? false,
+  # `release` serves the official shell; live UI development needs a `debug`
+  # (JIT) and, for profiling, a `profile` engine of the same locked source.
+  engineMode ? "release",
 }:
 let
   sourceLock = lib.importJSON ../prebuilt/flutter-engine/SOURCE_LOCK.json;
@@ -94,10 +97,15 @@ let
       );
     in
     if isEnginePackage then
+      let
+        engineRuntimeMode = args.runtimeMode or "release";
+        engineOptimized = args.isOptimized or (engineRuntimeMode != "debug");
+        engineOutName = "host_${engineRuntimeMode}${lib.optionalString (!engineOptimized) "_unopt"}";
+      in
       package.overrideAttrs (oldAttrs: {
         # Retain the actual configuration for the raw artifact's manifest.
         preInstall = (oldAttrs.preInstall or "") + ''
-          cp $out/out/host_release/args.gn $out/denial-args.gn
+          cp $out/out/${engineOutName}/args.gn $out/denial-args.gn
         '';
         nativeBuildInputs = (oldAttrs.nativeBuildInputs or [ ]) ++ [ engineCcache ];
         preBuild = (oldAttrs.preBuild or "") + engineCcacheSetup;
@@ -105,14 +113,25 @@ let
           if [[ -s $CCACHE_STATSLOG ]]; then
             ${lib.getExe pkgs.ccache} --show-log-stats
           fi
-        '' + (oldAttrs.postBuild or "");
-        configureFlags = (oldAttrs.configureFlags or [ ]) ++ [
-          "--ccache"
-          "--slimpeller"
-          "--gn-args=shell_enable_vulkan=false"
-          "--gn-args=test_enable_vulkan=false"
-          "--gn-args=skia_use_vulkan=false"
-        ];
+        ''
+        + (oldAttrs.postBuild or "");
+        configureFlags =
+          (oldAttrs.configureFlags or [ ])
+          ++ [
+            "--ccache"
+            # Slimpeller links a release engine; a debug or profile build
+            # links its own runtime instead.
+            "--gn-args=shell_enable_vulkan=false"
+            "--gn-args=test_enable_vulkan=false"
+            "--gn-args=skia_use_vulkan=false"
+          ]
+          ++ lib.optional (engineRuntimeMode == "release") "--slimpeller"
+          # Flutter's GTK desktop embedder is most of this build and Denial
+          # never loads it: the compositor runs the raw embedder. Building it
+          # also ties the engine to whichever GTK and Pango the caller's
+          # package set has, where newer ones stop compiling
+          # `fl_accessible_text_field.cc` at `g_autoptr(PangoContext)`.
+          ++ lib.optional (engineRuntimeMode != "release") "--disable-desktop-embeddings";
       })
     else
       package;
@@ -138,10 +157,11 @@ let
     url = "${sourceLock.flutter.repository}@${flutterRevision}";
     patches = [ ];
     runtimeModes = [
-      "release"
-      "release"
+      engineMode
+      engineMode
     ];
   };
+  engineVariant = rawEngine.${engineMode};
 in
 assert lib.assertMsg (
   maintenanceOnly
@@ -155,13 +175,13 @@ assert lib.assertMsg (
   )
 ) "Engine source locks differ; run tools/denial-nix refresh-engine-lock";
 rawEngine.overrideAttrs (oldAttrs: {
-  runtimeModes = [ "release" ];
-  altRuntimeMode = "release";
+  runtimeModes = [ engineMode ];
+  altRuntimeMode = engineMode;
   installPhase = ''
     runHook preInstall
     mkdir --parents $out/out
-    ln --symbolic ${rawEngine.release}/out/${rawEngine.release.outName} \
-      $out/out/${rawEngine.release.outName}
+    ln --symbolic ${engineVariant}/out/${engineVariant.outName} \
+      $out/out/${engineVariant.outName}
     runHook postInstall
   '';
   passthru = oldAttrs.passthru // {
@@ -169,5 +189,8 @@ rawEngine.overrideAttrs (oldAttrs: {
     depotToolsSource = engineTools.depot_tools;
     nativeLibc = stdenv.cc.libc;
     buildStrategy = "host-source";
+    inherit engineMode;
+    engineVariantPackage = engineVariant;
+    outName = engineVariant.outName;
   };
 })

@@ -59,6 +59,50 @@ let
     ];
   };
   disabledCfg = disabledIntegrations.config;
+  uiDevelopment = nixosSystem {
+    inherit (pkgs.stdenv.hostPlatform) system;
+    modules = [
+      module
+      {
+        boot.loader.grub.enable = false;
+        fileSystems."/" = {
+          device = "none";
+          fsType = "tmpfs";
+        };
+        programs.denial = {
+          enable = true;
+          uiDevelopment = {
+            enable = true;
+            sourceRemote = "https://example.invalid/denial.git";
+          };
+        };
+        system.stateVersion = "26.05";
+      }
+    ];
+  };
+  uiDevelopmentCfg = uiDevelopment.config;
+  uiDevelopmentPkgs = uiDevelopment.pkgs;
+  uiDevelopmentWithProfile = nixosSystem {
+    inherit (pkgs.stdenv.hostPlatform) system;
+    modules = [
+      module
+      {
+        boot.loader.grub.enable = false;
+        fileSystems."/" = {
+          device = "none";
+          fsType = "tmpfs";
+        };
+        programs.denial = {
+          enable = true;
+          uiDevelopment = {
+            enable = true;
+            profile = true;
+          };
+        };
+        system.stateVersion = "26.05";
+      }
+    ];
+  };
   compatible =
     args:
     import ../engine-compatible.nix (
@@ -143,6 +187,42 @@ pkgs.runCommand "denial-module-evaluation" { } ''
   test '${toString (builtins.elem "denial-session.target" cfg.systemd.user.services.denial-polkit-agent.wantedBy)}' = 1
   test '${toString (!disabledCfg.hardware.i2c.enable)}' = 1
   test '${toString (!disabledCfg.systemd.user.units."denial-polkit-agent.service".enable)}' = 1
+  test '${
+    toString (!(builtins.elem uiDevelopmentPkgs.denialUiDevelopment cfg.environment.systemPackages))
+  }' = 1
+  # An enabled runtime joins the compositor's own package, which is the one
+  # installed and the only one whose `bin/denial-ui` the session sees.
+  test '${toString (builtins.elem uiDevelopmentCfg.programs.denial.package uiDevelopmentCfg.environment.systemPackages)}' = 1
+  test '${
+    toString (uiDevelopmentCfg.programs.denial.package.drvPath != uiDevelopmentPkgs.denial.drvPath)
+  }' = 1
+  test '${
+    toString (
+      !(builtins.elem uiDevelopmentPkgs.denialUiDevelopment uiDevelopmentCfg.environment.systemPackages)
+    )
+  }' = 1
+  test '${
+    toString (
+      uiDevelopmentCfg.programs.denial.uiDevelopment.package == uiDevelopmentPkgs.denialUiDevelopment
+    )
+  }' = 1
+  test '${
+    toString (
+      uiDevelopmentWithProfile.config.programs.denial.uiDevelopment.package
+      == uiDevelopmentWithProfile.pkgs.denialUiDevelopmentProfile
+    )
+  }' = 1
+  test '${
+    toString (
+      uiDevelopmentWithProfile.config.programs.denial.package.drvPath
+      != uiDevelopmentWithProfile.pkgs.denial.drvPath
+    )
+  }' = 1
+  test '${
+    toString (!(uiDevelopmentCfg.environment.sessionVariables ? DENIAL_UI_DEVELOPMENT_ROOT))
+  }' = 1
+  test '${toString (!(cfg.environment.sessionVariables ? DENIAL_UI_SOURCE_REMOTE))}' = 1
+  test '${toString (!(cfg.environment.sessionVariables ? DENIAL_UI_TOOL))}' = 1
   test '${toString (compatible { })}' = 1
   test '${
     toString (compatible {

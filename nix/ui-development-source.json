@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "ui_development_api": 1,
+  "flutter_generation": "@generation@",
+  "source_ref": "@sourceRef@",
+  "source_revision": "@sourceRevision@",
+  "workspace": "dart_shell"
+}

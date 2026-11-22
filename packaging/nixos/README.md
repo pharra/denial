@@ -94,6 +94,34 @@ The module also registers the Wayland session, Denial's Settings portal and
 systemd user unit, the wlroots screenshot/screencast portal, Xwayland, polkit,
 realtime scheduling, and Denial's CJK fallback font.
 
+Live Flutter UI development is optional and off by default. Enabling it puts
+`pkgs.denialUiDevelopment`, the same package as
+`denial.packages.x86_64-linux.denial-ui-development`, into the compositor's own
+package, where `denialctl` and `denial-ui` look for it:
+
+```nix
+programs.denial.uiDevelopment.enable = true;
+```
+
+The package holds the native `denial-ui` client, a JIT engine built from
+Denial's locked Flutter source, the matching Flutter and Dart toolchain with the
+shell's locked Pub dependencies, and the version-matched workspace template.
+`denialctl ui setup` then clones the recorded revision, overlays that template,
+prepares the JIT bundle offline and switches the running shell to it;
+`denialctl ui restore` returns to the packaged shell. Both commands find that
+runtime next to themselves, so no session variable and no new login is needed.
+
+The engine is compiled from source on first use, so the first build is a long
+one; the packaged login session and `pkgs.denial` are unaffected. Flutter's GTK
+desktop embedder is skipped: Denial runs the raw embedder, and that embedder is
+most of the build and the part that stops compiling with newer GTK. Add
+`programs.denial.uiDevelopment.profile = true` for the AOT profile engine the
+performance-analysis workflow needs; it is a second engine build, so it is off
+by default. `denialctl ui setup` clones the repository that publishes its
+recorded revision, so a build from a fork or a private checkout sets
+`programs.denial.uiDevelopment.sourceRemote` to that repository. See
+[docs/UI_DEVELOPMENT.md](../../docs/UI_DEVELOPMENT.md).
+
 The module starts a PolicyKit authentication agent by default and enables I2C
 access for DDC monitor controls. Existing desktop integrations can replace or
 disable these defaults:
