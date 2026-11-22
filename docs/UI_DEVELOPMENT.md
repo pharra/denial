@@ -108,6 +108,15 @@ Install it from the Denial repository:
 sudo pacman -S denial-ui-development
 ```
 
+Every path the runtime uses can be named by the environment, and each variable
+falls back to the layout of a system installation when it is unset:
+`DENIAL_UI_DEVELOPMENT_ROOT` (`/usr/lib/denial/ui-development`),
+`DENIAL_UI_SOURCE_TEMPLATE` (`/usr/share/denial/ui-development/workspace`),
+`DENIAL_UI_TOOL` (`/usr/bin/denial-ui`) and `DENIAL_UI_GIT`. `denialctl ui
+setup` also names them in the editor configuration of the workspace it copies,
+so that workspace follows the installation that prepared it rather than the
+one it was built against.
+
 On NixOS, enable the module option instead. It links the same package
 (`denial.packages.x86_64-linux.denial-ui-development`, or
 `pkgs.denialUiDevelopment` from the overlay) into the compositor's own package,

@@ -332,6 +332,9 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     install -Dm644 ${packageSrc}/packages/denial_flutter_sdk/assets/fonts/roboto_flex/OFL.txt \
       $out/share/licenses/denial/OFL-1.1-RobotoFlex.txt
 
+    # The live UI development runtime is named once for the whole session, so
+    # a `denialctl` or `denial-ui` rebuilt from a checkout resolves it too.
+    # Without these variables those programs fall back to the system layout.
     wrapProgram $out/bin/denial-session \
       --prefix PATH : ${
         lib.makeBinPath [
@@ -339,6 +342,13 @@ stdenvNoCC.mkDerivation (finalAttrs: {
           systemd
           xwayland
         ]
+      } ${
+        lib.optionalString (uiDevelopment != null) ''
+          --set DENIAL_UI_DEVELOPMENT_ROOT "$out/lib/denial/ui-development" \
+          --set DENIAL_UI_SOURCE_TEMPLATE "$out/share/denial/ui-development/workspace" \
+          --set DENIAL_UI_TOOL "$out/bin/denial-ui" \
+          --set DENIAL_UI_GIT ${git}/bin/git ${uiDevelopmentSourceRemoteFlag}
+        ''
       }
 
     ${lib.optionalString (uiDevelopment != null) ''

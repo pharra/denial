@@ -285,13 +285,9 @@ stdenvNoCC.mkDerivation {
       --replace-fail '@generation@' '${generation}' \
       --replace-fail '@sourceRef@' '${sourceRef}' \
       --replace-fail '@sourceRevision@' '${sourceRevision}'
-    substituteInPlace \
-      $out/share/denial/ui-development/workspace/dart_shell/.vscode/settings.json \
-      --replace-fail '/usr/lib/denial/ui-development' \
-      "$out/lib/denial/ui-development"
-    substituteInPlace \
-      $out/share/denial/ui-development/workspace/dart_shell/.vscode/tasks.json \
-      --replace-fail '/usr/bin/denial-ui' "$out/bin/denial-ui"
+    # The editor configuration keeps the system defaults. `denialctl ui
+    # setup` names the installation it was invoked from when it copies the
+    # template, which also covers a runtime built from a checkout.
 
     runHook postInstall
   '';
@@ -333,10 +329,15 @@ stdenvNoCC.mkDerivation {
     test -f $out/share/denial/ui-development/workspace/plugins/denial_taskbar/pubspec.yaml
     grep --fixed-strings '"workspace": "dart_shell"' \
       $out/share/denial/ui-development/workspace/.denial-ui-source.json
-    grep --fixed-strings "$out/lib/denial/ui-development/flutter" \
+    # The template ships the system layout, which `denialctl ui setup`
+    # replaces with the paths of the installation it runs from.
+    grep --fixed-strings \
+      '/usr/lib/denial/ui-development/flutter/bin/cache/dart-sdk' \
       $out/share/denial/ui-development/workspace/dart_shell/.vscode/settings.json
-    ! grep --recursive --fixed-strings '/usr/lib/denial' \
-      $out/share/denial/ui-development/workspace
+    grep --fixed-strings '/usr/bin/denial-ui' \
+      $out/share/denial/ui-development/workspace/dart_shell/.vscode/tasks.json
+    grep --fixed-strings '/usr/bin/denial-flutter' \
+      $out/share/denial/ui-development/workspace/dart_shell/.vscode/launch.json
     runHook postInstallCheck
   '';
 

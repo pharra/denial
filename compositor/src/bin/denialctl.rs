@@ -23,6 +23,20 @@ const IO_TIMEOUT: Duration = Duration::from_secs(25);
 const MODE_SWITCH_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(75);
 const DENIAL_GIT_REMOTE: &str = "https://github.com/denialwm/denial.git";
+/// Where a system installation keeps the live UI development runtime. A Nix
+/// package sets the `DENIAL_UI_*` variables instead, so a runtime rebuilt
+/// from a checkout resolves the same paths.
+const SYSTEM_UI_DEVELOPMENT_ROOT: &str = "/usr/lib/denial/ui-development";
+const SYSTEM_UI_SOURCE_TEMPLATE: &str = "/usr/share/denial/ui-development/workspace";
+const SYSTEM_UI_TOOL: &str = "/usr/bin/denial-ui";
+const SYSTEM_UI_FLUTTER: &str = "/usr/bin/denial-flutter";
+/// The editor configuration the workspace template ships, relative to the
+/// Flutter workspace.
+const EDITOR_CONFIGURATION: [&str; 3] = [
+    ".vscode/settings.json",
+    ".vscode/tasks.json",
+    ".vscode/launch.json",
+];
 const UI_SOURCE_MARKER: &str = ".denial-ui-source.json";
 const MAX_SOURCE_MARKER_BYTES: usize = 64 * 1024;
 const MAX_TOOL_OUTPUT_BYTES: usize = 64 * 1024;
@@ -55,6 +69,149 @@ fn installed_sibling(name: &str) -> PathBuf {
         .ok()
         .and_then(|executable| executable.parent().map(|bin| bin.join(name)))
         .unwrap_or_else(|| PathBuf::from(name))
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+/// The version-matched workspace template: the one this configuration names,
+/// otherwise the one beside `denialctl`, otherwise the system installation.
+fn ui_source_template() -> PathBuf {
+    if let Some(template) = env_path("DENIAL_UI_SOURCE_TEMPLATE") {
+        return template;
+    }
+    let installed = installed_path("share/denial/ui-development/workspace");
+    if installed.is_dir() {
+        installed
+    } else {
+        PathBuf::from(SYSTEM_UI_SOURCE_TEMPLATE)
+    }
+}
+
+/// The runtime root: the one this configuration names, otherwise the one
+/// beside `denialctl`, otherwise the system installation.
+fn ui_development_root() -> PathBuf {
+    if let Some(root) = env_path("DENIAL_UI_DEVELOPMENT_ROOT") {
+        return root;
+    }
+    let installed = installed_path("lib/denial/ui-development");
+    if installed.is_dir() {
+        installed
+    } else {
+        PathBuf::from(SYSTEM_UI_DEVELOPMENT_ROOT)
+    }
+}
+
+/// `denial-ui`: the one this configuration names, otherwise the one beside
+/// `denialctl`, otherwise the one on `PATH`, otherwise the system install.
+fn ui_development_tool() -> PathBuf {
+    if let Some(tool) = env_path("DENIAL_DEVELOPMENT_TOOL").or_else(|| env_path("DENIAL_UI_TOOL")) {
+        return tool;
+    }
+    let sibling = installed_sibling("denial-ui");
+    if sibling.is_file() {
+        return sibling;
+    }
+    executable_on_path("denial-ui").unwrap_or_else(|| PathBuf::from(SYSTEM_UI_TOOL))
+}
+
+/// The Flutter passthrough installed beside the client.
+fn ui_development_flutter(tool: &Path) -> PathBuf {
+    let sibling = tool.with_file_name("denial-flutter");
+    if sibling.is_file() {
+        sibling
+    } else {
+        PathBuf::from(SYSTEM_UI_FLUTTER)
+    }
+}
+
+/// Collect the editor values that name the runtime, whatever installation
+/// produced them: the system defaults the template ships and the store paths
+/// an earlier package substituted.
+fn editor_replacements(
+    value: &Value,
+    root: &Path,
+    tool: &Path,
+    flutter: &Path,
+    replacements: &mut Vec<(String, String)>,
+) {
+    match value {
+        Value::String(text) => {
+            let path = Path::new(text);
+            let resolved = if text.ends_with("flutter/bin/cache/dart-sdk") {
+                Some(root.join("flutter/bin/cache/dart-sdk"))
+            } else if path.file_name() == Some(OsStr::new("flutter"))
+                && text.contains("/ui-development/flutter")
+            {
+                Some(root.join("flutter"))
+            } else if path.file_name() == Some(OsStr::new("denial-ui")) {
+                Some(tool.to_owned())
+            } else if path.file_name() == Some(OsStr::new("denial-flutter")) {
+                Some(flutter.to_owned())
+            } else {
+                None
+            };
+            if let Some(resolved) = resolved {
+                let resolved = resolved.to_string_lossy().into_owned();
+                if resolved != *text && !replacements.iter().any(|(old, _)| old == text) {
+                    replacements.push((text.clone(), resolved));
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                editor_replacements(item, root, tool, flutter, replacements);
+            }
+        }
+        Value::Object(entries) => {
+            for entry in entries.values() {
+                editor_replacements(entry, root, tool, flutter, replacements);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Name the resolved runtime in the editor configuration of a prepared
+/// workspace, so it points at an installation that exists whether the runtime
+/// came from a package, a Nix store or a checkout build. Values are replaced
+/// in place, leaving the file's own formatting alone.
+fn rewrite_editor_paths(contents: &str, root: &Path, tool: &Path, flutter: &Path) -> String {
+    let Ok(document) = serde_json::from_str::<Value>(contents) else {
+        return contents.to_owned();
+    };
+    let mut replacements = Vec::new();
+    editor_replacements(&document, root, tool, flutter, &mut replacements);
+    // A shorter value can be a prefix of a longer one.
+    replacements.sort_by_key(|(old, _)| std::cmp::Reverse(old.len()));
+    let mut rewritten = contents.to_owned();
+    for (old, new) in replacements {
+        rewritten = rewritten.replace(&old, &new);
+    }
+    rewritten
+}
+
+fn configure_editor_paths(workspace: &Path) -> Result<(), CliError> {
+    let root = ui_development_root();
+    let tool = ui_development_tool();
+    let flutter = ui_development_flutter(&tool);
+    for relative in EDITOR_CONFIGURATION {
+        let path = workspace.join(relative);
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(CliError::io(error)),
+        };
+        let rewritten = rewrite_editor_paths(&contents, &root, &tool, &flutter);
+        if rewritten != contents {
+            fs::write(&path, rewritten).map_err(CliError::io)?;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).map_err(CliError::io)?;
+        }
+    }
+    Ok(())
 }
 
 fn installed_path_from(executable: &Path, relative: &str) -> Option<PathBuf> {
@@ -98,6 +255,55 @@ mod installed_path_tests {
         assert_eq!(
             installed_path_from(Path::new("denialctl"), "share/denial"),
             None
+        );
+    }
+
+    const SETTINGS: &str = r#"{
+  "dart.sdkPath": "/usr/lib/denial/ui-development/flutter/bin/cache/dart-sdk",
+  "dart.flutterSdkPath": "/usr/lib/denial/ui-development/flutter",
+  "dart.flutterHotReloadOnSave": "allIfDirty"
+}"#;
+
+    fn rewrite(contents: &str) -> String {
+        rewrite_editor_paths(
+            contents,
+            Path::new("/store/runtime"),
+            Path::new("/store/bin/denial-ui"),
+            Path::new("/store/bin/denial-flutter"),
+        )
+    }
+
+    #[test]
+    fn names_the_resolved_runtime_in_the_editor_configuration() {
+        let rewritten = rewrite(SETTINGS);
+        assert!(!rewritten.contains("/usr/"));
+        assert!(rewritten.contains("/store/runtime/flutter/bin/cache/dart-sdk"));
+        assert!(rewritten.contains("\"/store/runtime/flutter\""));
+        assert!(rewritten.contains("\"dart.flutterHotReloadOnSave\": \"allIfDirty\""));
+    }
+
+    #[test]
+    fn follows_the_current_runtime_of_an_earlier_installation() {
+        let contents = r#"{
+  "tasks": [{"command": "/nix/store/old/bin/denial-ui"}],
+  "configurations": [{"customTool": "/nix/store/old/bin/denial-flutter"}]
+}"#;
+        let rewritten = rewrite(contents);
+        assert!(rewritten.contains("/store/bin/denial-ui"));
+        assert!(rewritten.contains("/store/bin/denial-flutter"));
+        assert!(!rewritten.contains("/nix/store/old"));
+    }
+
+    #[test]
+    fn keeps_the_system_paths_when_nothing_overrides_them() {
+        assert_eq!(
+            rewrite_editor_paths(
+                SETTINGS,
+                Path::new(SYSTEM_UI_DEVELOPMENT_ROOT),
+                Path::new(SYSTEM_UI_TOOL),
+                Path::new(SYSTEM_UI_FLUTTER),
+            ),
+            SETTINGS
         );
     }
 }
@@ -544,10 +750,7 @@ fn setup_ui_workspace(
     options: &Options,
     destination: Option<&Path>,
 ) -> Result<(), CliError> {
-    let template = env::var_os("DENIAL_UI_SOURCE_TEMPLATE")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| installed_path("share/denial/ui-development/workspace"));
+    let template = ui_source_template();
     let remote = env::var_os("DENIAL_UI_SOURCE_REMOTE")
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| OsString::from(DENIAL_GIT_REMOTE));
@@ -558,6 +761,9 @@ fn setup_ui_workspace(
         .unwrap_or_else(|| PathBuf::from("git"));
     let destination = resolve_setup_destination(destination)?;
     let (workspace, created) = materialize_ui_source(&template, &git, &remote, &destination)?;
+    // Refreshed on every setup: a workspace prepared by an earlier package
+    // still names that package's paths.
+    configure_editor_paths(&workspace)?;
 
     if !options.json {
         if created {
@@ -1030,11 +1236,7 @@ fn copy_source_tree(source: &Path, destination: &Path) -> Result<(), CliError> {
 }
 
 fn prepare_ui_workspace(workspace: &Path, capture_output: bool) -> Result<(), CliError> {
-    let tool = env::var_os("DENIAL_DEVELOPMENT_TOOL")
-        .filter(|value| !value.is_empty())
-        .or_else(|| env::var_os("DENIAL_UI_TOOL").filter(|value| !value.is_empty()))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| installed_sibling("denial-ui"));
+    let tool = ui_development_tool();
     let metadata = fs::symlink_metadata(&tool).map_err(|error| {
         CliError::new(format!(
             "Denial UI development tool is unavailable at {}: {error}; install denial-ui-development",

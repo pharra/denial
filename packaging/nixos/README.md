@@ -108,8 +108,12 @@ Denial's locked Flutter source, the matching Flutter and Dart toolchain with the
 shell's locked Pub dependencies, and the version-matched workspace template.
 `denialctl ui setup` then clones the recorded revision, overlays that template,
 prepares the JIT bundle offline and switches the running shell to it;
-`denialctl ui restore` returns to the packaged shell. Both commands find that
-runtime next to themselves, so no session variable and no new login is needed.
+`denialctl ui restore` returns to the packaged shell. The packaged session
+names the runtime in `DENIAL_UI_DEVELOPMENT_ROOT`, `DENIAL_UI_SOURCE_TEMPLATE`,
+`DENIAL_UI_TOOL` and `DENIAL_UI_GIT`, so programs rebuilt from a checkout
+resolve the same installation instead of the `/usr` layout. Those variables are
+the only place the paths are configured: the source defaults to a system
+installation when they are unset.
 
 The engine is compiled from source on first use, so the first build is a long
 one; the packaged login session and `pkgs.denial` are unaffected. Flutter's GTK

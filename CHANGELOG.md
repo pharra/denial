@@ -27,7 +27,12 @@ boundaries may change before 1.0.
   no session variable or new login is needed. It carries the native `denial-ui`
   client, a JIT engine built from the locked Flutter source, the matching
   Flutter and Dart toolchain with the shell's locked Pub dependencies, and
-  the version-matched workspace template. `programs.denial.uiDevelopment.
+  the version-matched workspace template. The runtime paths come from
+  `DENIAL_UI_DEVELOPMENT_ROOT`, `DENIAL_UI_SOURCE_TEMPLATE`, `DENIAL_UI_TOOL`
+  and `DENIAL_UI_GIT`, which the packaged session sets, so a client or
+  compositor rebuilt from a checkout resolves the installed runtime instead of
+  the `/usr` layout; `denialctl ui setup` writes those paths into the editor
+  configuration of the workspace it prepares. `programs.denial.uiDevelopment.
   profile = true` adds the AOT profile engine as a second engine build.
   Flutter's GTK desktop embedder, which Denial never loads, is skipped. The
   engine builds from source on first use, so enabling the option is a long
